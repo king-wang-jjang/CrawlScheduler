@@ -1,6 +1,6 @@
 import logging
 import pymongo
-from app.db.context import Database
+from db.context import Database
 from pymongo.errors import ConnectionFailure
 
 logger = logging.getLogger()

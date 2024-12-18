@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "crawlscheduler"
+version = "0.1.0"
+description = "crawl scheduler"
+authors = ["woody <woody@aicess.ai>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pymongo = "^4.10.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
