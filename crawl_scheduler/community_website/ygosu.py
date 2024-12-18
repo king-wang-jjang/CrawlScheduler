@@ -2,13 +2,12 @@ from datetime import datetime
 import os
 from bs4 import BeautifulSoup
 import requests
-from app.db.mongo_controller import MongoController
-from app.services.web_crawling.community_website.community_website import AbstractCommunityWebsite
-from app.utils.FTPClient import FTPClient
-from app.constants import DEFAULT_GPT_ANSWER, SITE_YGOSU, DEFAULT_TAG
+from crawl_scheduler.db.mongo_controller import MongoController
+from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
+from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_YGOSU, DEFAULT_TAG
 import logging
-from app.config import Config
-from app.utils.loghandler import crawler_logger, catch_exception
+from crawl_scheduler.config import Config
+from crawl_scheduler.utils.loghandler import crawler_logger, catch_exception
 import sys
 sys.excepthook = catch_exception
 
@@ -20,12 +19,6 @@ class Ygosu(AbstractCommunityWebsite):
         self.db_controller = MongoController()
         try:
             logger.info(f"Initializing Ygosu for date: {self.yyyymmdd}")
-            self.ftp_client = FTPClient(
-                server_address=Config().get_env('FTP_HOST'),
-                username=Config().get_env('FTP_USERNAME'),
-                password=Config().get_env('FTP_PASSWORD')
-            )
-            super().__init__(self.yyyymmdd, self.ftp_client)
             logger.info("Ygosu initialized successfully")
         except Exception as e:
             logger.error(f"Error initializing Ygosu: {e}")

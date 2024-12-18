@@ -5,11 +5,11 @@ import requests
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from app.constants import DEFAULT_GPT_ANSWER, SITE_DCINSIDE
-from app.db.mongo_controller import MongoController
-from app.services.web_crawling.community_website.community_website import AbstractCommunityWebsite
-from app.utils import FTPClient
-from app.config import Config
+from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_DCINSIDE
+from crawl_scheduler.db.mongo_controller import MongoController
+from crawl_scheduler.services.web_crawling.community_website.community_website import AbstractCommunityWebsite
+from crawl_scheduler.utils import FTPClient
+from crawl_scheduler.config import Config
 
 # selenium
 from selenium import webdriver

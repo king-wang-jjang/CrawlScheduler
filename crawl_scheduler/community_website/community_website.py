@@ -1,12 +1,11 @@
 import os
 from abc import ABC, abstractmethod  # abc 모듈 추가
-from app.config import Config
+from crawl_scheduler.config import Config
 # img to text
 import pytesseract
-from app.utils import FTPClient
 from PIL import Image
 import logging
-from app.utils.loghandler import setup_logger, catch_exception
+from crawl_scheduler.utils.loghandler import setup_logger, catch_exception
 import sys
 import cv2
 
@@ -21,16 +20,8 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
     dayBestUrl = ''
     realtimeBestUrl = ''
 
-    def __init__(self, yyyymmdd, ftp_client: FTPClient) -> None:
+    def __init__(self, yyyymmdd) -> None:
         logger.info(f"Initializing AbstractCommunityWebsite with date {yyyymmdd}")
-        self.ftp_client = ftp_client
-
-        # Try to create today's directory, log success or failure
-        if not self.ftp_client.create_today_directory(yyyymmdd):
-            logger.error("Failed to create today's directory.")
-            raise ValueError("Failed to create today's directory.")
-        else:
-            logger.info(f"Successfully created directory for {yyyymmdd}")
 
     @abstractmethod
     def get_daily_best(self):

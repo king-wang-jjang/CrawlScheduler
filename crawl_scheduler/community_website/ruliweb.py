@@ -2,17 +2,17 @@ import re
 from bs4 import BeautifulSoup
 import requests
 from datetime import datetime
-from app.utils.loghandler import catch_exception
+from crawl_scheduler.utils.loghandler import catch_exception
 import sys
 sys.excepthook = catch_exception
-from app.db.mongo_controller import MongoController
-from app.services.web_crawling.community_website.community_website import AbstractCommunityWebsite
-from app.utils import FTPClient
+from crawl_scheduler.db.mongo_controller import MongoController
+from crawl_scheduler.services.web_crawling.community_website.community_website import AbstractCommunityWebsite
+from crawl_scheduler.utils import FTPClient
 import logging
-from app.config import Config
-from app.constants import DEFAULT_GPT_ANSWER, SITE_RULIWEB, DEFAULT_TAG
+from crawl_scheduler.config import Config
+from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_RULIWEB, DEFAULT_TAG
 import os
-from app.utils.loghandler import crawler_logger
+from crawl_scheduler.utils.loghandler import crawler_logger
 
 logger = crawler_logger()
 

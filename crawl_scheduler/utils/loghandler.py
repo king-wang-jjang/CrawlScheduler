@@ -1,8 +1,8 @@
 import logging
 import requests
 from colorama import Fore, init, Style
-from app.config import Config
-from app.db.mongo_controller import MongoController
+from config import Config
+from db.mongo_controller import MongoController
 import threading
 import bson
 import uuid
@@ -245,7 +245,7 @@ def setup_logger():
         os.makedirs(log_directory)
 
     # 날짜별로 로그 파일을 생성하기 위한 핸들러 설정
-    file_handler = logging.handlers.TimedRotatingFileHandler(f"{log_directory}/app.log", when="midnight", interval=7, backupCount=30)
+    file_handler = logging.handlers.TimedRotatingFileHandler(f"{log_directory}/crawl_scheduler.log", when="midnight", interval=7, backupCount=30)
     file_handler.setLevel(logging.INFO)
     stream_handler = logging.StreamHandler()
     stream_handler.setLevel(logging.INFO)

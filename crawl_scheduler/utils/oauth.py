@@ -1,9 +1,9 @@
 from authlib.integrations.starlette_client import OAuth
-from app.config import Config
+from crawl_scheduler.config import Config
 import jwt
 import hashlib
 from datetime import datetime,timedelta
-from app.utils.loghandler import catch_exception,setup_logger
+from crawl_scheduler.utils.loghandler import catch_exception,setup_logger
 import sys
 sys.excepthook = catch_exception
 logger = setup_logger()

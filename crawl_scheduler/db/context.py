@@ -1,6 +1,6 @@
 from pymongo import MongoClient
-from app.config import Config
 from urllib.parse import quote_plus
+from config import Config
 
 
 class Database:

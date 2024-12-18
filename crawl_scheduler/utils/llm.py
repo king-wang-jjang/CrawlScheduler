@@ -8,11 +8,11 @@ from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 import os
-from app.utils.loghandler import catch_exception
+from crawl_scheduler.utils.loghandler import catch_exception
 import sys
-from app.utils.loghandler import setup_logger
+from crawl_scheduler.utils.loghandler import setup_logger
 sys.excepthook = catch_exception
-from app.config import Config
+from crawl_scheduler.config import Config
 import logging
 logger = setup_logger()
 class LLM:

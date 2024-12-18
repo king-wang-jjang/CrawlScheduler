@@ -2,12 +2,12 @@ from datetime import datetime
 import os
 from bs4 import BeautifulSoup
 import requests
-from app.db.mongo_controller import MongoController
-from app.services.web_crawling.community_website.community_website import AbstractCommunityWebsite
-from app.constants import DEFAULT_GPT_ANSWER, SITE_THEQOO, DEFAULT_TAG
-from app.utils import FTPClient
-from app.config import Config
-from app.utils.loghandler import catch_exception
+from crawl_scheduler.db.mongo_controller import MongoController
+from crawl_scheduler.services.web_crawling.community_website.community_website import AbstractCommunityWebsite
+from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_THEQOO, DEFAULT_TAG
+from crawl_scheduler.utils import FTPClient
+from crawl_scheduler.config import Config
+from crawl_scheduler.utils.loghandler import catch_exception
 import sys
 
 sys.excepthook = catch_exception
@@ -19,7 +19,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 import logging
-from app.utils.loghandler import crawler_logger
+from crawl_scheduler.utils.loghandler import crawler_logger
 
 logger = crawler_logger()
 

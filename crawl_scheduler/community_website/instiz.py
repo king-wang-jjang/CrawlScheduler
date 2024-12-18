@@ -1,14 +1,14 @@
 import re
 from bs4 import BeautifulSoup
 import requests
-from app.db.mongo_controller import MongoController
-from app.services.web_crawling.community_website.community_website import AbstractCommunityWebsite
+from crawl_scheduler.db.mongo_controller import MongoController
+from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
 from datetime import datetime
-from app.utils import FTPClient
+from crawl_scheduler.utils import FTPClient
 import logging
-from app.config import Config
-from app.constants import DEFAULT_GPT_ANSWER, SITE_INSTIZ, DEFAULT_TAG
-from app.utils.loghandler import crawler_logger, catch_exception
+from crawl_scheduler.config import Config
+from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_INSTIZ, DEFAULT_TAG
+from crawl_scheduler.utils.loghandler import crawler_logger, catch_exception
 import sys
 import os
 
