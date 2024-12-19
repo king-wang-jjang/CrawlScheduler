@@ -1,7 +1,7 @@
 import logging
 import requests
 from colorama import Fore, init, Style
-from config import Config
+from crawl_scheduler.config import Config
 from db.mongo_controller import MongoController
 import threading
 import bson
@@ -203,7 +203,7 @@ class DBLOGHandler(logging.Handler):
 
 def crawler_logger():
     logger = logging.getLogger("crawler")
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
 
     # 로그 폴더가 없으면 생성
     log_directory = "log"
@@ -212,9 +212,9 @@ def crawler_logger():
 
     # 날짜별로 로그 파일을 생성하기 위한 핸들러 설정
     file_handler = logging.handlers.TimedRotatingFileHandler(f"{log_directory}/crawler.log", when="midnight", interval=7, backupCount=30)
-    file_handler.setLevel(logging.DEBUG)
+    file_handler.setLevel(logging.WARN)
     stream_handler = logging.StreamHandler()
-    stream_handler.setLevel(logging.WARN)
+    stream_handler.setLevel(logging.DEBUG)
 
     # 포맷 설정
     formatter = logging.Formatter("%(levelname)s: [%(asctime)s]%(name)s %(filename)s:%(lineno)d - %(message)s")
@@ -243,8 +243,6 @@ logger = crawler_logger()
 try:
     with open("crawl_scheduler/assets/banner.txt", "r") as banner_file:
         banner_content = banner_file.read()
-        logger.info(f"{banner_content}")  # 첫 로깅 메시지로 추가
+        logger.info(f"\n{banner_content}")  # 첫 로깅 메시지로 추가
 except FileNotFoundError:
     logger.warning("banner.txt 파일을 찾을 수 없습니다.")
-
-logger.info((f"SERVER_RUN_MODE: {Config().get_env('SERVER_RUN_MODE')}"))

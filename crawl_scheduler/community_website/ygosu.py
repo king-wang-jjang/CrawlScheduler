@@ -5,20 +5,12 @@ import requests
 from crawl_scheduler.db.mongo_controller import MongoController
 from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_YGOSU, DEFAULT_TAG
-from crawl_scheduler.utils.loghandler import crawler_logger, catch_exception
+from crawl_scheduler.utils.loghandler import logger
 import sys
-sys.excepthook = catch_exception
-logger = crawler_logger()
 
 class Ygosu(AbstractCommunityWebsite):
     def __init__(self):
-        self.yyyymmdd = datetime.today().strftime('%Y%m%d')
         self.db_controller = MongoController()
-        try:
-            logger.info(f"Initializing Ygosu for date: {self.yyyymmdd}")
-            logger.info("Ygosu initialized successfully")
-        except Exception as e:
-            logger.error(f"Error initializing Ygosu: {e}")
 
     def get_daily_best(self):
         logger.info("Fetching daily best posts from Ygosu")

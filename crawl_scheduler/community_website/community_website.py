@@ -1,19 +1,11 @@
 import os
 from abc import ABC, abstractmethod  # abc 모듈 추가
-from crawl_scheduler.config import Config
 # img to text
 import pytesseract
 from PIL import Image
-import logging
-from crawl_scheduler.utils.loghandler import setup_logger, catch_exception
-import sys
+from crawl_scheduler.utils.loghandler import logger
 import cv2
 
-# Exception hook setup for catching unhandled exceptions
-sys.excepthook = catch_exception
-
-# Logger setup
-logger = setup_logger()
 
 
 class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
