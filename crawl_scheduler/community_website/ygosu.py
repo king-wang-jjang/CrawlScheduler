@@ -5,12 +5,9 @@ import requests
 from crawl_scheduler.db.mongo_controller import MongoController
 from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_YGOSU, DEFAULT_TAG
-import logging
-from crawl_scheduler.config import Config
 from crawl_scheduler.utils.loghandler import crawler_logger, catch_exception
 import sys
 sys.excepthook = catch_exception
-
 logger = crawler_logger()
 
 class Ygosu(AbstractCommunityWebsite):
