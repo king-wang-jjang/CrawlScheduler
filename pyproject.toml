@@ -8,6 +8,13 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.12"
 pymongo = "^4.10.1"
+pydotenv = "^0.0.7"
+python-dotenv = "^1.0.1"
+requests = "^2.32.3"
+colorama = "^0.4.6"
+bs4 = "^0.0.2"
+pytesseract = "^0.3.13"
+opencv-python = "^4.10.0.84"
 
 
 [build-system]
