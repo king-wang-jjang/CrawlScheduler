@@ -3,61 +3,35 @@ from bs4 import BeautifulSoup
 import requests
 from datetime import datetime
 from crawl_scheduler.db.mongo_controller import MongoController
-from crawl_scheduler.services.web_crawling.community_website.community_website import AbstractCommunityWebsite
-from crawl_scheduler.utils import FTPClient
-import logging
-from crawl_scheduler.utils.loghandler import catch_exception
-import sys
-
-sys.excepthook = catch_exception
-from crawl_scheduler.config import Config
+from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_PPOMPPU, DEFAULT_TAG
 import os
-from crawl_scheduler.utils.loghandler import crawler_logger
-
-logger = crawler_logger()
-
+from crawl_scheduler.utils.loghandler import logger
 
 class Ppomppu(AbstractCommunityWebsite):
     def __init__(self):
-        self.yyyymmdd = datetime.today().strftime('%Y%m%d')
         self.db_controller = MongoController()
-        try:
-            logger.info("Initializing Ppomppu instance")
-            self.ftp_client = FTPClient.FTPClient(
-                server_address=Config().get_env('FTP_HOST'),
-                username=Config().get_env('FTP_USERNAME'),
-                password=Config().get_env('FTP_PASSWORD'))
-            super().__init__(self.yyyymmdd, self.ftp_client)
-            logger.info("Ppomppu initialized successfully")
-        except Exception as e:
-            logger.error("Error initializing Ppomppu: %s", e)
 
     def get_daily_best(self):
         pass
 
     def get_real_time_best(self):
-        '''
-        Fetches the real-time best posts from Ppomppu.
-        '''
-        logger.info("Fetching real-time best posts from Ppomppu")
-        num = 1
-        _url = f"https://www.ppomppu.co.kr/hot.php?id=&page={num}&category=999"
+        _url = f"https://www.ppomppu.co.kr/hot.php?id=&page=1&category=999"
         try:
             response = requests.get(_url)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
         except Exception as e:
-            logger.error(f"Error fetching page: {_url}, error: {e}")
+            logger.error(f"fetching page: {_url}, error: {e}")
             return {}
 
         now = datetime.now()
         already_exists_post = []
 
         result = []
-        for tr in soup.find_all('tr', class_='line'):
+        for tr in soup.find_all('tr', class_='bbs_new1'):
             try:
-                title_element = tr.find('a', class_='title')
+                title_element = tr.find('a', class_='baseList-title')
                 create_time_element = tr.find('td', class_='board_date')
                 create_time = create_time_element.get_text(strip=True)
 
@@ -167,9 +141,8 @@ class Ppomppu(AbstractCommunityWebsite):
             return None
 
     def _post_already_exists(self, board_id):
-        logger.debug(f"Checking if post {board_id} already exists in the database")
         existing_instance = self.db_controller.find('RealTime', {'board_id': board_id, 'site': SITE_PPOMPPU})
-        return existing_instance is not None
+        return existing_instance
 
     def _get_or_create_gpt_object(self, board_id):
         logger.debug(f"Fetching or creating GPT object for board_id: {board_id}")
