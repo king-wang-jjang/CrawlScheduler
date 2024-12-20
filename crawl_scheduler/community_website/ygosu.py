@@ -115,8 +115,11 @@ class Ygosu(AbstractCommunityWebsite):
                     logger.info(f"Post {board_id} inserted successfully")
             except Exception as e:
                 logger.error(f"Error processing real-time post: {e}")
+                return False
 
         logger.info({"already exists post": already_exists_post})
+        return True
+    
 
     def get_board_contents(self, board_id):
         logger.info(f"Fetching contents for board_id: {board_id}")
@@ -178,7 +181,7 @@ class Ygosu(AbstractCommunityWebsite):
 
     def _post_already_exists(self, board_id, collection):
         existing_instance = self.db_controller.find(collection, {'board_id': board_id, 'site': SITE_YGOSU})
-        return existing_instance is not None
+        return existing_instance
 
     def _get_or_create_gpt_object(self, board_id):
         gpt_exists = self.db_controller.find('GPT', {'board_id': board_id, 'site': SITE_YGOSU})
