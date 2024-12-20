@@ -67,7 +67,6 @@ class Ygosu(AbstractCommunityWebsite):
         logger.info({"already exists post": already_exists_post})
 
     def get_real_time_best(self):
-        logger.info("Fetching real-time best posts from Ygosu")
         try:
             req = requests.get('https://ygosu.com/board/real_article')
             req.raise_for_status()
@@ -112,7 +111,7 @@ class Ygosu(AbstractCommunityWebsite):
                         'GPTAnswer': gpt_obj_id,
                         'Tag': tag_obj_id
                     })
-                    logger.info(f"Post {board_id} inserted successfully")
+                    logger.info(f"Inserted Success: {board_id} ")
             except Exception as e:
                 logger.error(f"Error processing real-time post: {e}")
                 return False
