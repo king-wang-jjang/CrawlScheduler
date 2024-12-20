@@ -53,7 +53,7 @@ class Ppomppu(AbstractCommunityWebsite):
                         already_exists_post.append(board_id)
                         continue
 
-                    gpt_obj_id = self._get_or_create_gpt_object(board_id)
+                    gpt_obj_id = self.get_gpt_obj(board_id)
                     tag_obj_id = self._get_or_create_tag_object(board_id)
 
                     self.db_controller.insert_one('RealTime', {
@@ -144,7 +144,7 @@ class Ppomppu(AbstractCommunityWebsite):
         existing_instance = self.db_controller.find('RealTime', {'board_id': board_id, 'site': SITE_PPOMPPU})
         return existing_instance
 
-    def _get_or_create_gpt_object(self, board_id):
+    def get_gpt_obj(self, board_id):
         logger.debug(f"Fetching or creating GPT object for board_id: {board_id}")
         gpt_exists = self.db_controller.find('GPT', {'board_id': board_id, 'site': SITE_PPOMPPU})
         if gpt_exists:

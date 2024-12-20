@@ -47,7 +47,7 @@ class Ygosu(AbstractCommunityWebsite):
                         already_exists_post.append(board_id)
                         continue
 
-                    gpt_obj_id = self._get_or_create_gpt_object(board_id)
+                    gpt_obj_id = self.get_gpt_obj(board_id)
                     tag_obj_id = self._get_or_create_tag_object(board_id)
 
                     self.db_controller.insert_one('Daily', {
@@ -99,7 +99,7 @@ class Ygosu(AbstractCommunityWebsite):
                         already_exists_post.append(board_id)
                         continue
 
-                    gpt_obj_id = self._get_or_create_gpt_object(board_id)
+                    gpt_obj_id = self.get_gpt_obj(board_id)
                     tag_obj_id = self._get_or_create_tag_object(board_id)
 
                     self.db_controller.insert_one('RealTime', {
@@ -182,7 +182,7 @@ class Ygosu(AbstractCommunityWebsite):
         existing_instance = self.db_controller.find(collection, {'board_id': board_id, 'site': SITE_YGOSU})
         return existing_instance
 
-    def _get_or_create_gpt_object(self, board_id):
+    def get_gpt_obj(self, board_id):
         gpt_exists = self.db_controller.find('GPT', {'board_id': board_id, 'site': SITE_YGOSU})
         if gpt_exists:
             return gpt_exists[0]['_id']

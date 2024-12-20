@@ -35,6 +35,11 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
         logger.info(f"Saving image from URL: {url}")
         return {}
 
+    @abstractmethod
+    def get_gpt_obj(self, url):
+        logger.info(f"Saving image from URL: {url}")
+        return {}
+
     def img_to_text(self, img_path):
         logger.info(f"Converting image to text from path: {img_path}")
         custom_config = r'--oem 3 --psm 6 -l kor'

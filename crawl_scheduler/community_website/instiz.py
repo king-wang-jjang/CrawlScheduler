@@ -73,7 +73,7 @@ class Instiz(AbstractCommunityWebsite):
                         already_exists_post.append(board_id)
                         continue
 
-                    gpt_obj_id = self._get_or_create_gpt_object(board_id)
+                    gpt_obj_id = self.get_gpt_obj(board_id)
                     tag_obj_id = self._get_or_create_tag_object(board_id)
 
                     self.db_controller.insert_one('RealTime', {
@@ -165,7 +165,7 @@ class Instiz(AbstractCommunityWebsite):
             logger.error(f"Error saving image from {url}: {e}")
             return None
 
-    def _get_or_create_gpt_object(self, board_id):
+    def get_gpt_obj(self, board_id):
         logger.debug(f"Checking or creating GPT object for {board_id}")
         try:
             gpt_exists = self.db_controller.find('GPT', {'board_id': board_id, 'site': SITE_INSTIZ})

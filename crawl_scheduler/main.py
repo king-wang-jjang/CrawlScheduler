@@ -30,10 +30,9 @@ def get_real_time_best():
         if crawl is None:
             logger.warning(f"Skipping null crawler in list.")
             continue
-
         try:
             current_site = crawl.__class__.__name__
-            logger.info(f"Starting real-time best fetch from {current_site}")
+            logger.info(f"Start - real-time {current_site}")
             if (crawl.get_real_time_best()):
                 logger.info(f"Success: {current_site}")
                 success_status[current_site] = "Success"
@@ -41,9 +40,9 @@ def get_real_time_best():
                 logger.info(f"Fail: {current_site}")
                 success_status[current_site] = "Fail"
         except Exception as e:
-            logger.error(f"Error fetching real-time best from {crawl.__class__.__name__}: {str(e)}", exc_info=True)
+            logger.error(f"Error - real-time {crawl.__class__.__name__}: {str(e)}", exc_info=True)
         
-        logger.info(f"\n{success_status}")
+    logger.info(f"\n{success_status}")
 
 if __name__ == "__main__":
     get_real_time_best()

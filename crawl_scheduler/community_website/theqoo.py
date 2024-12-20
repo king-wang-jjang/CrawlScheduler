@@ -79,7 +79,7 @@ class Theqoo(AbstractCommunityWebsite):
                     if self._post_already_exists(board_id, already_exists_post):
                         continue
 
-                    gpt_obj_id = self._get_or_create_gpt_object(board_id)
+                    gpt_obj_id = self.get_gpt_obj(board_id)
                     tag_obj_id = self._get_or_create_tag_object(board_id)
 
                     self.db_controller.insert_one('RealTime', {
@@ -173,7 +173,7 @@ class Theqoo(AbstractCommunityWebsite):
             return True
         return False
 
-    def _get_or_create_gpt_object(self, board_id):
+    def get_gpt_obj(self, board_id):
         gpt_exists = self.db_controller.find('GPT', {'board_id': board_id, 'site': SITE_THEQOO})
         if gpt_exists:
             return gpt_exists[0]['_id']
