@@ -166,25 +166,7 @@ class Ygosu(AbstractCommunityWebsite):
         return content_list
     
     def save_file(self, url):
-        print(1)
-    # def save_file(self, url):
-    #     logger.info(f"Saving image from URL: {url}")
-    #     if not os.path.exists(self.download_path):
-    #         os.makedirs(self.download_path)
-
-    #     try:
-    #         response = requests.get(url)
-    #         response.raise_for_status()
-    #         img_name = os.path.basename(url)
-
-    #         with open(os.path.join(self.download_path, img_name), 'wb') as f:
-    #             f.write(response.content)
-
-    #         logger.info(f"Image saved successfully at {self.download_path}/{img_name}")
-    #         return os.path.join(self.download_path, img_name)
-    #     except Exception as e:
-    #         logger.error(f"Error saving image {url}: {e}")
-    #         return None
+        pass
 
     def _extract_board_id(self, url):
         for part in url.split('/'):

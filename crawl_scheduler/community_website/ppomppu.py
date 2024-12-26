@@ -54,7 +54,7 @@ class Ppomppu(AbstractCommunityWebsite):
                         continue
 
                     gpt_obj_id = self.get_gpt_obj(board_id)
-
+                    contents = self.get_board_contents(url=domain+url)
                     self.db_controller.insert_one('RealTime', {
                         'board_id': board_id,
                         'site': SITE_PPOMPPU,
@@ -62,6 +62,7 @@ class Ppomppu(AbstractCommunityWebsite):
                         'url': domain + url,
                         'create_time': target_datetime,
                         'gpt_answer': gpt_obj_id,
+                        'contents': contents
                     })
                     logger.info(f"Post {board_id} inserted successfully")
             except Exception as e:
@@ -81,18 +82,19 @@ class Ppomppu(AbstractCommunityWebsite):
             logger.warning(f"Could not extract board id from URL: {url}")
             return None
 
-    def get_board_contents(self, board_id):
-        abs_path = f'./{self.yyyymmdd}/{board_id}'
-        self.download_path = os.path.abspath(abs_path)
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-        }
+    def get_board_contents(self, board_id=None, url=None):
+        if board_id:
+            url = self.db_controller.find('RealTime', {'board_id': board_id, 'site': SITE_PPOMPPU})[0]['url']
+        elif url:
+            url = url
+        else:
+            logger.error('No Url')
 
-        daily_instance = self.db_controller.find('RealTime', {'board_id': board_id, 'site': 'ppomppu'})
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
         content_list = []
-        if daily_instance:
+        if url:
             try:
-                response = requests.get(daily_instance[0]['url'], headers=headers)
+                response = requests.get(url, headers=headers)
                 response.raise_for_status()
                 soup = BeautifulSoup(response.text, 'lxml')
                 board_body = soup.find('td', class_='board-contents')
@@ -102,40 +104,27 @@ class Ppomppu(AbstractCommunityWebsite):
                     if p.find('img'):
                         img_url = "https:" + p.find('img')['src']
                         try:
-                            img_txt = super().img_to_text(self.save_img(img_url))
-                            content_list.append({'type': 'image', 'url': img_url, 'content': img_txt})
+                            file_path = super().save_file(img_url)
+                            img_txt = super().img_to_text(file_path)
+                            content_list.append({'type': 'image', 'path': file_path, 'content': img_txt})
                         except Exception as e:
                             logger.error(f"Error processing image: {e}")
                     elif p.find('video'):
                         video_url = "https:" + p.find('video').find('source')['src']
                         try:
-                            self.save_img(video_url)
+                            file_path = super().save_file(video_url)
+                            content_list.append({'type': 'video', 'path': file_path})
                         except Exception as e:
                             logger.error(f"Error saving video: {e}")
                     else:
                         content_list.append({'type': 'text', 'content': p.text.strip()})
             except Exception as e:
-                logger.error(f"Error fetching board contents for {board_id}: {e}")
+                logger.error(f"Error fetching board contents for {board_id if board_id else url}: {e}")
+
         return content_list
 
-    def save_img(self, url):
-        logger.info(f"Saving image from URL: {url}")
-        if not os.path.exists(self.download_path):
-            os.makedirs(self.download_path)
-
-        try:
-            response = requests.get(url)
-            response.raise_for_status()
-            img_name = os.path.basename(url)
-
-            with open(os.path.join(self.download_path, img_name), 'wb') as f:
-                f.write(response.content)
-
-            logger.info(f"Image saved successfully at {self.download_path}/{img_name}")
-            return os.path.join(self.download_path, img_name)
-        except Exception as e:
-            logger.error(f"Error saving image: {e}")
-            return None
+    def save_file(self, url):
+        pass
 
     def _post_already_exists(self, board_id):
         existing_instance = self.db_controller.find('RealTime', {'board_id': board_id, 'site': SITE_PPOMPPU})

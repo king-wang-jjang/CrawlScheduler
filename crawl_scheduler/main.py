@@ -21,7 +21,7 @@ from crawl_scheduler.utils.loghandler import logger
 # board_semaphores = {}
 
 def get_real_time_best():
-    # crawl_List = [Ygosu()]
+    # crawl_List = [Ppomppu()]
     # success_status = {}
 
     # for crawl in crawl_List:
@@ -31,7 +31,7 @@ def get_real_time_best():
     #     try:
     #         current_site = crawl.__class__.__name__
     #         logger.info(f"Start - real-time {current_site}")
-    #         print(crawl.get_board_contents(url='https://ygosu.com/board/real_article/yeobgi/2104183/?type=normal'))
+    #         print(crawl.get_board_contents(url='https://www.ppomppu.co.kr/zboard/view.php?id=freeboard&no=9145984'))
     #     except Exception as e:
     #         logger.error(f"Error - real-time {crawl.__class__.__name__}: {str(e)}", exc_info=True)
         
@@ -39,8 +39,8 @@ def get_real_time_best():
 
     # return True
     # crawl_List = [Ygosu(), Ppomppu(), Theqoo(), Instiz(), Ruliweb()]
-    # crawl_List = [Ygosu(), Ppomppu()]
-    crawl_List = [Ygosu()]
+    crawl_List = [Ygosu(), Ppomppu()]
+    # crawl_List = [Ppomppu()]
     success_status = {}
 
     for crawl in crawl_List:
