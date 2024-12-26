@@ -61,5 +61,15 @@ def get_real_time_best():
         
     logger.info(f"\n{success_status}")
 
-if __name__ == "__main__":
+import schedule
+import time
+
+def job():
     get_real_time_best()
+
+if __name__ == "__main__":
+    schedule.every(5).minutes.do(job)  # 5분마다 실행
+
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
