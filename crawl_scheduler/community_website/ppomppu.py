@@ -39,7 +39,7 @@ class Ppomppu(AbstractCommunityWebsite):
                     title = title_element.get_text(strip=True)
                     domain = "https://ppomppu.co.kr"
                     url = title_element['href']
-                    board_id = self.extract_id_and_no_from_url(url)
+                    board_id = int(self.extract_id_and_no_from_url(url))
 
                     hour, minute, second = map(int, create_time.split(":"))
                     target_datetime = datetime(now.year, now.month, now.day, hour, minute)
@@ -54,7 +54,6 @@ class Ppomppu(AbstractCommunityWebsite):
                         continue
 
                     gpt_obj_id = self.get_gpt_obj(board_id)
-                    tag_obj_id = self._get_or_create_tag_object(board_id)
 
                     self.db_controller.insert_one('RealTime', {
                         'board_id': board_id,
@@ -62,8 +61,7 @@ class Ppomppu(AbstractCommunityWebsite):
                         'title': title,
                         'url': domain + url,
                         'create_time': target_datetime,
-                        'GPTAnswer': gpt_obj_id,
-                        'Tag': tag_obj_id
+                        'gpt_answer': gpt_obj_id,
                     })
                     logger.info(f"Post {board_id} inserted successfully")
             except Exception as e:
@@ -84,7 +82,6 @@ class Ppomppu(AbstractCommunityWebsite):
             return None
 
     def get_board_contents(self, board_id):
-        logger.info(f"Fetching contents for board_id: {board_id}")
         abs_path = f'./{self.yyyymmdd}/{board_id}'
         self.download_path = os.path.abspath(abs_path)
         headers = {
@@ -145,7 +142,6 @@ class Ppomppu(AbstractCommunityWebsite):
         return existing_instance
 
     def get_gpt_obj(self, board_id):
-        logger.debug(f"Fetching or creating GPT object for board_id: {board_id}")
         gpt_exists = self.db_controller.find('GPT', {'board_id': board_id, 'site': SITE_PPOMPPU})
         if gpt_exists:
             return gpt_exists[0]['_id']
@@ -153,19 +149,7 @@ class Ppomppu(AbstractCommunityWebsite):
             gpt_obj = self.db_controller.insert_one('GPT', {
                 'board_id': board_id,
                 'site': SITE_PPOMPPU,
-                'answer': DEFAULT_GPT_ANSWER
+                'answer': DEFAULT_GPT_ANSWER,
+                'tag': DEFAULT_TAG
             })
             return gpt_obj.inserted_id
-
-    def _get_or_create_tag_object(self, board_id):
-        logger.debug(f"Fetching or creating Tag object for board_id: {board_id}")
-        tag_exists = self.db_controller.find('TAG', {'board_id': board_id, 'site': SITE_PPOMPPU})
-        if tag_exists:
-            return tag_exists[0]['_id']
-        else:
-            tag_obj = self.db_controller.insert_one('TAG', {
-                'board_id': board_id,
-                'site': SITE_PPOMPPU,
-                'Tag': DEFAULT_TAG
-            })
-            return tag_obj.inserted_id

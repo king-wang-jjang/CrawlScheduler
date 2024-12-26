@@ -18,12 +18,29 @@ from crawl_scheduler.community_website.ppomppu import Ppomppu
 from crawl_scheduler.community_website.ygosu import Ygosu
 from crawl_scheduler.utils.loghandler import logger
 
-board_semaphores = {}
-db_controller = MongoController()
+# board_semaphores = {}
 
 def get_real_time_best():
-    # CrawllerList = [Ygosu(), Ppomppu(), Theqoo(), Instiz(), Ruliweb()]
-    crawl_List = [Ygosu(), Ppomppu()]
+    # crawl_List = [Ygosu()]
+    # success_status = {}
+
+    # for crawl in crawl_List:
+    #     if crawl is None:
+    #         logger.warning(f"Skipping null crawler in list.")
+    #         continue
+    #     try:
+    #         current_site = crawl.__class__.__name__
+    #         logger.info(f"Start - real-time {current_site}")
+    #         print(crawl.get_board_contents(url='https://ygosu.com/board/real_article/yeobgi/2104183/?type=normal'))
+    #     except Exception as e:
+    #         logger.error(f"Error - real-time {crawl.__class__.__name__}: {str(e)}", exc_info=True)
+        
+    # logger.info(f"\n{success_status}")
+
+    # return True
+    # crawl_List = [Ygosu(), Ppomppu(), Theqoo(), Instiz(), Ruliweb()]
+    # crawl_List = [Ygosu(), Ppomppu()]
+    crawl_List = [Ygosu()]
     success_status = {}
 
     for crawl in crawl_List:

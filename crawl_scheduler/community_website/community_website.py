@@ -2,7 +2,8 @@ import os
 from abc import ABC, abstractmethod  # abc 모듈 추가
 # img to text
 import pytesseract
-from PIL import Image
+import requests
+from crawl_scheduler.config import Config
 from crawl_scheduler.utils.loghandler import logger
 import cv2
 
@@ -31,9 +32,16 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
         return {}
 
     @abstractmethod
-    def save_img(self, url):
+    def save_file(self, url):
+        path = Config().get_env('root')
         logger.info(f"Saving image from URL: {url}")
-        return {}
+        if not os.path.exists(path):
+            os.makedirs(path)
+        file_path = os.path.join(path, os.path.basename(url))
+        with open(file_path, 'wb') as f:
+            response = requests.get(url)
+            f.write(response.content)
+        return file_path
 
     @abstractmethod
     def get_gpt_obj(self, url):
@@ -41,6 +49,8 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
         return {}
 
     def img_to_text(self, img_path):
+        pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+
         logger.info(f"Converting image to text from path: {img_path}")
         custom_config = r'--oem 3 --psm 6 -l kor'
         allowed_extensions = ['jpg', 'png', 'jpeg']

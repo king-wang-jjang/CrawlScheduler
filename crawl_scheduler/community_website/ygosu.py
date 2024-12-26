@@ -57,8 +57,8 @@ class Ygosu(AbstractCommunityWebsite):
                         'title': title,
                         'url': url,
                         'create_time': target_datetime,
-                        'GPTAnswer': gpt_obj_id,
-                        'Tag': tag_obj_id
+                        'gpt_answer': gpt_obj_id,
+                        'tag': tag_obj_id
                     })
                     logger.info(f"Post {board_id} inserted successfully")
             except Exception as e:
@@ -94,22 +94,21 @@ class Ygosu(AbstractCommunityWebsite):
                     hour, minute = map(int, create_time.split(':'))
                     target_datetime = datetime(now.year, now.month, now.day, hour, minute)
 
-                    board_id = self._extract_board_id(url)
+                    board_id = int(self._extract_board_id(url))
                     if self._post_already_exists(board_id, 'RealTime'):
                         already_exists_post.append(board_id)
                         continue
 
                     gpt_obj_id = self.get_gpt_obj(board_id)
-                    tag_obj_id = self._get_or_create_tag_object(board_id)
-
+                    contents = self.get_board_contents(url=url)
                     self.db_controller.insert_one('RealTime', {
                         'board_id': board_id,
                         'site': SITE_YGOSU,
                         'title': title,
                         'url': url,
                         'create_time': target_datetime,
-                        'GPTAnswer': gpt_obj_id,
-                        'Tag': tag_obj_id
+                        'gpt_answer': gpt_obj_id,
+                        'contents': contents
                     })
                     logger.info(f"Inserted Success: {board_id} ")
             except Exception as e:
@@ -118,59 +117,74 @@ class Ygosu(AbstractCommunityWebsite):
 
         logger.info({"already exists post": already_exists_post})
         return True
-    
 
-    def get_board_contents(self, board_id):
-        logger.info(f"Fetching contents for board_id: {board_id}")
-        abs_path = f'./{self.yyyymmdd}/{board_id}'
-        self.download_path = os.path.abspath(abs_path)
-        daily_instance = self.db_controller.find('RealTime', {'board_id': board_id, 'site': SITE_YGOSU})
-
+    def get_board_contents(self, board_id=None, url=None):
+        if board_id:
+            url = self.db_controller.find('RealTime', {'board_id': board_id, 'site': SITE_YGOSU})[0]['url']
+        elif url:
+            url = url
+        else:
+            logger.error('No Url')
+            
         content_list = []
-        if daily_instance:
+        if url:
             try:
-                response = requests.get(daily_instance[0]['url'])
+                response = requests.get(url)
                 response.raise_for_status()
                 soup = BeautifulSoup(response.content, 'html.parser')
                 board_body = soup.find('div', class_='container')
                 paragraphs = board_body.find_all('p')
 
-                for p in paragraphs:
-                    if p.find('img'):
-                        img_url = p.find('img')['src']
-                        try:
-                            img_txt = super().img_to_text(self.save_img(img_url))
-                            content_list.append({'type': 'image', 'url': img_url, 'content': img_txt})
-                        except Exception as e:
-                            logger.error(f"Error processing image {img_url}: {e}")
-                    elif p.find('video'):
-                        video_url = p.find('video').find('source')['src']
-                        self.save_img(video_url)
-                    else:
-                        content_list.append({'type': 'text', 'content': p.text.strip()})
+                for element in board_body.find_all(['p', 'div'], recursive=True):  # <p>와 <div> 순회
+                    if element.name == 'p':  # 텍스트 추출
+                        text = element.text.strip()
+                        if text:
+                            content_list.append({'type': 'text', 'content': text})
+                    elif element.name == 'div':  # 이미지 또는 비디오 추출
+                        img = element.find('img')
+                        if img and 'src' in img.attrs:  # 이미지 처리
+                            img_url = img['src']
+                            try:
+                                file_path = super().save_file(img_url)
+                                img_txt = super().img_to_text(file_path)
+                                content_list.append({'type': 'image', 'path': file_path, 'content': img_txt})
+                            except Exception as e:
+                                logger.error(f"Error processing image {img_url}: {e}")
+                        video = element.find('video')
+                        if video:  # 비디오 처리
+                            source = video.find('source')
+                            if source and 'src' in source.attrs:
+                                video_url = source['src']
+                                try:
+                                    file_path = super().save_file(video_url)  # 비디오 저장
+                                    content_list.append({'type': 'video', 'path': file_path})
+                                except Exception as e:
+                                    logger.error(f"Error processing video {video_url}: {e}")
             except Exception as e:
                 logger.error(f"Error fetching board contents for {board_id}: {e}")
 
         return content_list
+    
+    def save_file(self, url):
+        print(1)
+    # def save_file(self, url):
+    #     logger.info(f"Saving image from URL: {url}")
+    #     if not os.path.exists(self.download_path):
+    #         os.makedirs(self.download_path)
 
-    def save_img(self, url):
-        logger.info(f"Saving image from URL: {url}")
-        if not os.path.exists(self.download_path):
-            os.makedirs(self.download_path)
+    #     try:
+    #         response = requests.get(url)
+    #         response.raise_for_status()
+    #         img_name = os.path.basename(url)
 
-        try:
-            response = requests.get(url)
-            response.raise_for_status()
-            img_name = os.path.basename(url)
+    #         with open(os.path.join(self.download_path, img_name), 'wb') as f:
+    #             f.write(response.content)
 
-            with open(os.path.join(self.download_path, img_name), 'wb') as f:
-                f.write(response.content)
-
-            logger.info(f"Image saved successfully at {self.download_path}/{img_name}")
-            return os.path.join(self.download_path, img_name)
-        except Exception as e:
-            logger.error(f"Error saving image {url}: {e}")
-            return None
+    #         logger.info(f"Image saved successfully at {self.download_path}/{img_name}")
+    #         return os.path.join(self.download_path, img_name)
+    #     except Exception as e:
+    #         logger.error(f"Error saving image {url}: {e}")
+    #         return None
 
     def _extract_board_id(self, url):
         for part in url.split('/'):
@@ -190,18 +204,7 @@ class Ygosu(AbstractCommunityWebsite):
             gpt_obj = self.db_controller.insert_one('GPT', {
                 'board_id': board_id,
                 'site': SITE_YGOSU,
-                'answer': DEFAULT_GPT_ANSWER
+                'answer': DEFAULT_GPT_ANSWER,
+                'tag': DEFAULT_TAG
             })
             return gpt_obj.inserted_id
-
-    def _get_or_create_tag_object(self, board_id):
-        tag_exists = self.db_controller.find('TAG', {'board_id': board_id, 'site': SITE_YGOSU})
-        if tag_exists:
-            return tag_exists[0]['_id']
-        else:
-            tag_obj = self.db_controller.insert_one('TAG', {
-                'board_id': board_id,
-                'site': SITE_YGOSU,
-                'Tag': DEFAULT_TAG
-            })
-            return tag_obj.inserted_id
