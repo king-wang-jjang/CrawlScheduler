@@ -54,7 +54,7 @@ class Ppomppu(AbstractCommunityWebsite):
                         continue
 
                     gpt_obj_id = self.get_gpt_obj(board_id)
-                    contents = self.get_board_contents(url=domain+url)
+                    contents = self.get_board_contents(url=domain+url, board_id=board_id)
                     self.db_controller.insert_one('RealTime', {
                         'board_id': board_id,
                         'site': SITE_PPOMPPU,
@@ -66,7 +66,7 @@ class Ppomppu(AbstractCommunityWebsite):
                     })
                     logger.info(f"Post {board_id} inserted successfully")
             except Exception as e:
-                logger.error(f"Error processing post: {e}")
+                logger.error(f"Error processing post{board_id}{url}: {e}")
 
         logger.info({"already exists post": already_exists_post})
 
@@ -83,13 +83,6 @@ class Ppomppu(AbstractCommunityWebsite):
             return None
 
     def get_board_contents(self, board_id=None, url=None):
-        if board_id:
-            url = self.db_controller.find('RealTime', {'board_id': board_id, 'site': SITE_PPOMPPU})[0]['url']
-        elif url:
-            url = url
-        else:
-            logger.error('No Url')
-
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
         content_list = []
         if url:
@@ -104,15 +97,15 @@ class Ppomppu(AbstractCommunityWebsite):
                     if p.find('img'):
                         img_url = "https:" + p.find('img')['src']
                         try:
-                            file_path = super().save_file(img_url)
+                            file_path = super().save_file(img_url, board_id=board_id)
                             img_txt = super().img_to_text(file_path)
                             content_list.append({'type': 'image', 'path': file_path, 'content': img_txt})
                         except Exception as e:
-                            logger.error(f"Error processing image: {e}")
+                            logger.error(f"Error processing image: {url} {e}")
                     elif p.find('video'):
                         video_url = "https:" + p.find('video').find('source')['src']
                         try:
-                            file_path = super().save_file(video_url)
+                            file_path = super().save_file(video_url, board_id=board_id)
                             content_list.append({'type': 'video', 'path': file_path})
                         except Exception as e:
                             logger.error(f"Error saving video: {e}")

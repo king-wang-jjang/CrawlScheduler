@@ -31,7 +31,7 @@ def get_real_time_best():
     #     try:
     #         current_site = crawl.__class__.__name__
     #         logger.info(f"Start - real-time {current_site}")
-    #         print(crawl.get_board_contents(url='https://www.ppomppu.co.kr/zboard/view.php?id=freeboard&no=9145984'))
+    #         print(crawl.get_board_contents(url='https://www.ppomppu.co.kr/zboard/view.php?id=freeboard&no=9146073', board_id='123123'))
     #     except Exception as e:
     #         logger.error(f"Error - real-time {crawl.__class__.__name__}: {str(e)}", exc_info=True)
         

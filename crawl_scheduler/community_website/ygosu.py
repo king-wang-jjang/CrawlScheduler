@@ -100,7 +100,7 @@ class Ygosu(AbstractCommunityWebsite):
                         continue
 
                     gpt_obj_id = self.get_gpt_obj(board_id)
-                    contents = self.get_board_contents(url=url)
+                    contents = self.get_board_contents(url=url, board_id=board_id)
                     self.db_controller.insert_one('RealTime', {
                         'board_id': board_id,
                         'site': SITE_YGOSU,
@@ -119,13 +119,6 @@ class Ygosu(AbstractCommunityWebsite):
         return True
 
     def get_board_contents(self, board_id=None, url=None):
-        if board_id:
-            url = self.db_controller.find('RealTime', {'board_id': board_id, 'site': SITE_YGOSU})[0]['url']
-        elif url:
-            url = url
-        else:
-            logger.error('No Url')
-            
         content_list = []
         if url:
             try:
@@ -136,30 +129,65 @@ class Ygosu(AbstractCommunityWebsite):
                 paragraphs = board_body.find_all('p')
 
                 for element in board_body.find_all(['p', 'div'], recursive=True):  # <p>와 <div> 순회
-                    if element.name == 'p':  # 텍스트 추출
-                        text = element.text.strip()
-                        if text:
-                            content_list.append({'type': 'text', 'content': text})
-                    elif element.name == 'div':  # 이미지 또는 비디오 추출
-                        img = element.find('img')
-                        if img and 'src' in img.attrs:  # 이미지 처리
-                            img_url = img['src']
+                    img = element.find('img')
+                    if img and 'src' in img.attrs:  # 이미지 처리
+                        img_url = img['src']
+                        alt_text = img.get('alt', 'default_image_name')
+                        try:
+                            file_path = super().save_file(img_url, board_id=board_id, alt_text=alt_text)
+                            img_txt = super().img_to_text(file_path)
+                            content_list.append({'type': 'image', 'path': file_path, 'content': img_txt})
+                        except Exception as e:
+                            logger.error(f"Error processing image {img_url}: {e}")
+                    video = element.find('video')
+                    if video:  # 비디오 처리
+                        source = video.find('source')
+                        if source and 'src' in source.attrs:
+                            video_url = source['src']
                             try:
-                                file_path = super().save_file(img_url)
-                                img_txt = super().img_to_text(file_path)
-                                content_list.append({'type': 'image', 'path': file_path, 'content': img_txt})
+                                file_path = super().save_file(video_url, board_id=board_id)  # 비디오 저장
+                                content_list.append({'type': 'video', 'path': file_path})
                             except Exception as e:
-                                logger.error(f"Error processing image {img_url}: {e}")
-                        video = element.find('video')
-                        if video:  # 비디오 처리
-                            source = video.find('source')
-                            if source and 'src' in source.attrs:
-                                video_url = source['src']
-                                try:
-                                    file_path = super().save_file(video_url)  # 비디오 저장
-                                    content_list.append({'type': 'video', 'path': file_path})
-                                except Exception as e:
-                                    logger.error(f"Error processing video {video_url}: {e}")
+                                logger.error(f"Error processing video {video_url}: {e}")
+                    text = element.text.strip()
+                    if text:
+                        content_list.append({'type': 'text', 'content': text})
+                        
+                    # if element.name == 'p':  # 텍스트 추출
+                    #     video = element.find('video')
+                    #     if video:
+                    #         source = video.find('source')
+                    #         if source and 'src' in source.attrs:
+                    #             video_url = source['src']
+                    #             try:
+                    #                 file_path = super().save_file(video_url, board_id=board_id)  # 비디오 저장
+                    #                 content_list.append({'type': 'video', 'path': file_path})
+                    #             except Exception as e:
+                    #                 logger.error(f"Error processing video {video_url}: {e}")
+                    #     else: 
+                    #         text = element.text.strip()
+                    #         if text:
+                    #             content_list.append({'type': 'text', 'content': text})
+                    # elif element.name == 'div':  # 이미지 또는 비디오 추출
+                    #     img = element.find('img')
+                    #     if img and 'src' in img.attrs:  # 이미지 처리
+                    #         img_url = img['src']
+                    #         try:
+                    #             file_path = super().save_file(img_url, board_id=board_id)
+                    #             img_txt = super().img_to_text(file_path)
+                    #             content_list.append({'type': 'image', 'path': file_path, 'content': img_txt})
+                    #         except Exception as e:
+                    #             logger.error(f"Error processing image {img_url}: {e}")
+                    #     video = element.find('video')
+                    #     if video:  # 비디오 처리
+                    #         source = video.find('source')
+                    #         if source and 'src' in source.attrs:
+                    #             video_url = source['src']
+                    #             try:
+                    #                 file_path = super().save_file(video_url, board_id=board_id)  # 비디오 저장
+                    #                 content_list.append({'type': 'video', 'path': file_path})
+                    #             except Exception as e:
+                    #                 logger.error(f"Error processing video {video_url}: {e}")
             except Exception as e:
                 logger.error(f"Error fetching board contents for {board_id}: {e}")
 

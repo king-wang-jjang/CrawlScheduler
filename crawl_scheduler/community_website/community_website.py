@@ -32,15 +32,23 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
         return {}
 
     @abstractmethod
-    def save_file(self, url):
-        path = Config().get_env('root')
+    def save_file(self, url, board_id, alt_text=None):
+        child_class_name = self.__class__.__name__
+        path = os.path.join(Config().get_env('root'), child_class_name, str(board_id))
         logger.info(f"Saving image from URL: {url}")
-        if not os.path.exists(path):
-            os.makedirs(path)
-        file_path = os.path.join(path, os.path.basename(url))
+        os.makedirs(path, exist_ok=True)
+        if alt_text:
+            file_name = alt_text
+        else:
+            file_name = os.path.basename(url)
+        file_name_without_extension, file_extension = os.path.splitext(file_name)
+        file_path = os.path.join(path, file_name)
+        index = 1
+        while os.path.exists(file_path):
+            file_path = os.path.join(path, f"{file_name_without_extension}_{index}{file_extension}")
+            index += 1
         with open(file_path, 'wb') as f:
-            response = requests.get(url)
-            f.write(response.content)
+            f.write(requests.get(url).content)
         return file_path
 
     @abstractmethod
