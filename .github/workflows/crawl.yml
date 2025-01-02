@@ -75,7 +75,7 @@ jobs:
           echo "DB_HOST=${{ secrets.DB_HOST }}" >> .env
           echo "DB_NAME=${{ secrets.DB_NAME }}" >> .env
           echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
-          echo "ROOT=${{secrets.ROOT}} >> .env
+          echo "ROOT=${{secrets.ROOT}}" >> .env
 
       # Was 인스턴스에 github secrets 변수 값들을 .env 파일에 복사해서 was 인스턴스에 업로드
       # .env 파일에 데이터를 넣어야하는데 그 데이터는 github secrets에 있음
