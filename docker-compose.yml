@@ -1,10 +1,9 @@
 version: "3.3"
 
 services:
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+  kingwangjjang-crawl:
+    image: hwanju1596/crawl_scheduler:0.0.1
+    env_file:
+      - .env
     volumes:
-      - /app/test:/mnt/kingwangjjang
-    command: poetry run sh prod.sh
+      - ./app/test:/mnt/kingwangjjang
