@@ -6,5 +6,5 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - /app/test:/mnt/hello
+      - /app/test:/mnt/kingwangjjang
     command: poetry run sh prod.sh
