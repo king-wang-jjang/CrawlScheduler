@@ -6,4 +6,4 @@ services:
     env_file:
       - .env
     volumes:
-      - ./app/test:/mnt/kingwangjjang
+      - ./app/public:/mnt/kingwangjjang
