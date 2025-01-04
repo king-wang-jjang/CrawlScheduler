@@ -1,5 +1,6 @@
 from datetime import datetime
 import os
+from typing import Tuple
 from bs4 import BeautifulSoup
 import requests
 from crawl_scheduler.db.mongo_controller import MongoController
@@ -42,7 +43,7 @@ class Ygosu(AbstractCommunityWebsite):
                     year, month, day = map(int, create_time.split('-'))
                     target_datetime = datetime(year, month, day)
 
-                    board_id = self._extract_board_id(url)
+                    board_id = self.get_category_and_no(url)
                     if self._post_already_exists(board_id, 'Daily'):
                         already_exists_post.append(board_id)
                         continue
@@ -94,15 +95,15 @@ class Ygosu(AbstractCommunityWebsite):
                     hour, minute = map(int, create_time.split(':'))
                     target_datetime = datetime(now.year, now.month, now.day, hour, minute)
 
-                    board_id = int(self._extract_board_id(url))
-                    if self._post_already_exists(board_id, 'RealTime'):
-                        already_exists_post.append(board_id)
+                    category, no = self.get_category_and_no(url)
+                    if self._post_already_exists((category, no), 'RealTime'):
+                        already_exists_post.append((category, no))
                         continue
 
-                    gpt_obj_id = self.get_gpt_obj(board_id)
-                    contents = self.get_board_contents(url=url, board_id=board_id)
+                    gpt_obj_id = self.get_gpt_obj((category, no))
+                    contents = self.get_board_contents(url=url, board_id=(category, no))
                     self.db_controller.insert_one('RealTime', {
-                        'board_id': board_id,
+                        'board_id': (category, no),
                         'site': SITE_YGOSU,
                         'title': title,
                         'url': url,
@@ -110,7 +111,7 @@ class Ygosu(AbstractCommunityWebsite):
                         'gpt_answer': gpt_obj_id,
                         'contents': contents
                     })
-                    logger.info(f"Inserted Success: {board_id} ")
+                    logger.info(f"Inserted Success: {(category, no)} ")
             except Exception as e:
                 logger.error(f"Error processing real-time post: {e}")
                 return False
@@ -152,42 +153,7 @@ class Ygosu(AbstractCommunityWebsite):
                     text = element.text.strip()
                     if text:
                         content_list.append({'type': 'text', 'content': text})
-                        
-                    # if element.name == 'p':  # 텍스트 추출
-                    #     video = element.find('video')
-                    #     if video:
-                    #         source = video.find('source')
-                    #         if source and 'src' in source.attrs:
-                    #             video_url = source['src']
-                    #             try:
-                    #                 file_path = super().save_file(video_url, board_id=board_id)  # 비디오 저장
-                    #                 content_list.append({'type': 'video', 'path': file_path})
-                    #             except Exception as e:
-                    #                 logger.error(f"Error processing video {video_url}: {e}")
-                    #     else: 
-                    #         text = element.text.strip()
-                    #         if text:
-                    #             content_list.append({'type': 'text', 'content': text})
-                    # elif element.name == 'div':  # 이미지 또는 비디오 추출
-                    #     img = element.find('img')
-                    #     if img and 'src' in img.attrs:  # 이미지 처리
-                    #         img_url = img['src']
-                    #         try:
-                    #             file_path = super().save_file(img_url, board_id=board_id)
-                    #             img_txt = super().img_to_text(file_path)
-                    #             content_list.append({'type': 'image', 'path': file_path, 'content': img_txt})
-                    #         except Exception as e:
-                    #             logger.error(f"Error processing image {img_url}: {e}")
-                    #     video = element.find('video')
-                    #     if video:  # 비디오 처리
-                    #         source = video.find('source')
-                    #         if source and 'src' in source.attrs:
-                    #             video_url = source['src']
-                    #             try:
-                    #                 file_path = super().save_file(video_url, board_id=board_id)  # 비디오 저장
-                    #                 content_list.append({'type': 'video', 'path': file_path})
-                    #             except Exception as e:
-                    #                 logger.error(f"Error processing video {video_url}: {e}")
+            
             except Exception as e:
                 logger.error(f"Error fetching board contents for {board_id}: {e}")
 
@@ -196,11 +162,12 @@ class Ygosu(AbstractCommunityWebsite):
     def save_file(self, url):
         pass
 
-    def _extract_board_id(self, url):
-        for part in url.split('/'):
-            if part.isdigit():
-                return part
-        return None
+    def get_category_and_no(self, url) -> Tuple[str, int]:
+        parts = url.split('/')
+        no = parts[-2]
+        category = parts[-3]
+        
+        return category, int(no)
 
     def _post_already_exists(self, board_id, collection):
         existing_instance = self.db_controller.find(collection, {'board_id': board_id, 'site': SITE_YGOSU})

@@ -39,7 +39,7 @@ class Ppomppu(AbstractCommunityWebsite):
                     title = title_element.get_text(strip=True)
                     domain = "https://ppomppu.co.kr"
                     url = title_element['href']
-                    board_id = int(self.extract_id_and_no_from_url(url))
+                    category, no = int(self.get_category_and_no(url))
 
                     hour, minute, second = map(int, create_time.split(":"))
                     target_datetime = datetime(now.year, now.month, now.day, hour, minute)
@@ -49,14 +49,14 @@ class Ppomppu(AbstractCommunityWebsite):
                         break
 
                     # Check if the post already exists
-                    if self._post_already_exists(board_id):
-                        already_exists_post.append(board_id)
+                    if self._post_already_exists((category, no)):
+                        already_exists_post.append((category, no))
                         continue
 
-                    gpt_obj_id = self.get_gpt_obj(board_id)
-                    contents = self.get_board_contents(url=domain+url, board_id=board_id)
+                    gpt_obj_id = self.get_gpt_obj((category, no))
+                    contents = self.get_board_contents(url=domain+url, board_id=(category, no))
                     self.db_controller.insert_one('RealTime', {
-                        'board_id': board_id,
+                        'board_id': (category, no),
                         'site': SITE_PPOMPPU,
                         'title': title,
                         'url': domain + url,
@@ -64,23 +64,23 @@ class Ppomppu(AbstractCommunityWebsite):
                         'gpt_answer': gpt_obj_id,
                         'contents': contents
                     })
-                    logger.info(f"Post {board_id} inserted successfully")
+                    logger.info(f"Post {(category, no)} inserted successfully")
             except Exception as e:
-                logger.error(f"Error processing post{board_id}{url}: {e}")
+                logger.error(f"Error processing post{(category, no)}{url}: {e}")
 
         logger.info({"already exists post": already_exists_post})
 
         data = {"rank": {i + 1: item for i, item in enumerate(result)}}
         return data
 
-    def extract_id_and_no_from_url(self, url):
+    def get_category_and_no(self, url):
         pattern = r"id=([^&]*)&no=([^&]*)"
         match = re.search(pattern, url)
         if match:
-            return match.group(2)
+            return match.group(1), match.group(2)
         else:
-            logger.warning(f"Could not extract board id from URL: {url}")
-            return None
+            logger.warning(f"Could not extract board id and no from URL: {url}")
+            return None, None
 
     def get_board_contents(self, board_id=None, url=None):
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
