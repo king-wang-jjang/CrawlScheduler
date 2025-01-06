@@ -54,7 +54,7 @@ class Ppomppu(AbstractCommunityWebsite):
                         continue
 
                     gpt_obj_id = self.get_gpt_obj((category, no))
-                    contents = self.get_board_contents(url=domain+url, board_id=(category, no))
+                    contents = self.get_board_contents(url=domain+url, category=category, no= no)
                     self.db_controller.insert_one('RealTime', {
                         'board_id': (category, no),
                         'site': SITE_PPOMPPU,
@@ -82,7 +82,7 @@ class Ppomppu(AbstractCommunityWebsite):
             logger.warning(f"Could not extract board id and no from URL: {url}")
             return None, None
 
-    def get_board_contents(self, board_id=None, url=None):
+    def get_board_contents(self, category= None, no=None, url=None):
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
         content_list = []
         if url:
@@ -97,7 +97,7 @@ class Ppomppu(AbstractCommunityWebsite):
                     if p.find('img'):
                         img_url = "https:" + p.find('img')['src']
                         try:
-                            file_path = super().save_file(img_url, board_id=board_id)
+                            file_path = super().save_file(img_url, category=category, no=no)
                             img_txt = super().img_to_text(file_path)
                             content_list.append({'type': 'image', 'path': file_path, 'content': img_txt})
                         except Exception as e:
@@ -105,14 +105,14 @@ class Ppomppu(AbstractCommunityWebsite):
                     elif p.find('video'):
                         video_url = "https:" + p.find('video').find('source')['src']
                         try:
-                            file_path = super().save_file(video_url, board_id=board_id)
+                            file_path = super().save_file(video_url, category=category, no=no)
                             content_list.append({'type': 'video', 'path': file_path})
                         except Exception as e:
                             logger.error(f"Error saving video: {e}")
                     else:
                         content_list.append({'type': 'text', 'content': p.text.strip()})
             except Exception as e:
-                logger.error(f"Error fetching board contents for {board_id if board_id else url}: {e}")
+                logger.error(f"Error fetching board contents for {no if no else url}: {e}")
 
         return content_list
 

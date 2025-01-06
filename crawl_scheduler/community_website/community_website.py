@@ -32,9 +32,9 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
         return {}
 
     @abstractmethod
-    def save_file(self, url, board_id, alt_text=None):
+    def save_file(self, url, category, no, alt_text=None):
         child_class_name = self.__class__.__name__
-        path = os.path.join(Config().get_env('ROOT'), child_class_name, str(board_id))
+        path = os.path.join(Config().get_env('ROOT'), child_class_name, str(catagory),str(no))
         logger.info(f"Saving image from URL: {url}")
         os.makedirs(path, exist_ok=True)
         if alt_text:

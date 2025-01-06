@@ -101,7 +101,7 @@ class Ygosu(AbstractCommunityWebsite):
                         continue
 
                     gpt_obj_id = self.get_gpt_obj((category, no))
-                    contents = self.get_board_contents(url=url, board_id=(category, no))
+                    contents = self.get_board_contents(url=url, category=category, no= no)
                     self.db_controller.insert_one('RealTime', {
                         'board_id': (category, no),
                         'site': SITE_YGOSU,
@@ -119,7 +119,7 @@ class Ygosu(AbstractCommunityWebsite):
         logger.info({"already exists post": already_exists_post})
         return True
 
-    def get_board_contents(self, board_id=None, url=None):
+    def get_board_contents(self, category=None, no=None, url=None):
         content_list = []
         if url:
             try:
@@ -135,7 +135,7 @@ class Ygosu(AbstractCommunityWebsite):
                         img_url = img['src']
                         alt_text = img.get('alt', 'default_image_name')
                         try:
-                            file_path = super().save_file(img_url, board_id=board_id, alt_text=alt_text)
+                            file_path = super().save_file(img_url, category=category, no=no, alt_text=alt_text)
                             img_txt = super().img_to_text(file_path)
                             content_list.append({'type': 'image', 'path': file_path, 'content': img_txt})
                         except Exception as e:
@@ -146,7 +146,7 @@ class Ygosu(AbstractCommunityWebsite):
                         if source and 'src' in source.attrs:
                             video_url = source['src']
                             try:
-                                file_path = super().save_file(video_url, board_id=board_id)  # 비디오 저장
+                                file_path = super().save_file(video_url, category=category, no=no)  # 비디오 저장
                                 content_list.append({'type': 'video', 'path': file_path})
                             except Exception as e:
                                 logger.error(f"Error processing video {video_url}: {e}")
@@ -155,7 +155,7 @@ class Ygosu(AbstractCommunityWebsite):
                         content_list.append({'type': 'text', 'content': text})
             
             except Exception as e:
-                logger.error(f"Error fetching board contents for {board_id}: {e}")
+                logger.error(f"Error fetching board contents for {no}: {e}")
 
         return content_list
     
