@@ -47,8 +47,7 @@ jobs:
       #    # Docker Hub 퍼블리시 step
       #    - name: Publish to docker hub
       #      run: docker push hwanju1596/kingwangjjang-be:0.0.1
-      #
-      #
+      
       - name: Build and push crawl_scheduler
         uses: docker/build-push-action@v6
         with:

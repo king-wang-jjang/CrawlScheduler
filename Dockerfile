@@ -18,7 +18,7 @@ COPY ./pyproject.toml ./poetry.lock* /app/
 RUN poetry cache clear --all pypi
 
 # 필요 라이브러리 설치
-RUN poetry lock && poetry install --only main
+RUN poetry lock && poetry install --no-root
 
 #소스코드 복사
 COPY . .
