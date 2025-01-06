@@ -40,6 +40,7 @@ class Ppomppu(AbstractCommunityWebsite):
                     domain = "https://ppomppu.co.kr"
                     url = title_element['href']
                     category, no = self.get_category_and_no(url)
+                    no = int(no)
 
                     hour, minute, second = map(int, create_time.split(":"))
                     target_datetime = datetime(now.year, now.month, now.day, hour, minute)
