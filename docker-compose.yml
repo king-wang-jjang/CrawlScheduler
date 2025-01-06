@@ -1,5 +1,3 @@
-version: "3.3"
-
 services:
   kingwangjjang-crawl:
     image: hwanju1596/crawl_scheduler:0.0.1
