@@ -12,6 +12,12 @@ RUN pip install poetry
 RUN apt-get update -y
 RUN apt-get install libgl1-mesa-glx -y
 
+# tesseract-ocr
+RUN apt-get update && apt-get install -y \
+    tesseract-ocr \
+    libtesseract-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 #poetry 관련 파일 복사
 COPY ./pyproject.toml ./poetry.lock* /app/
 
