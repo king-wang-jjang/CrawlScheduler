@@ -57,7 +57,8 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
         return {}
 
     def img_to_text(self, img_path):
-        pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+        
+        # pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
         logger.info(f"Converting image to text from path: {img_path}")
         custom_config = r'--oem 3 --psm 6 -l kor'
