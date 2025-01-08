@@ -8,6 +8,7 @@ from crawl_scheduler.community_website.community_website import AbstractCommunit
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_YGOSU, DEFAULT_TAG
 from crawl_scheduler.utils.loghandler import logger
 import sys
+import uuid
 
 class Ygosu(AbstractCommunityWebsite):
     def __init__(self):
@@ -133,9 +134,21 @@ class Ygosu(AbstractCommunityWebsite):
                     img = element.find('img')
                     if img and 'src' in img.attrs:  # 이미지 처리
                         img_url = img['src']
-                        alt_text = img.get('alt', 'default_image_name')
+                        img_response = requests.get(img_url)
+                        # Content-Type 확인
+                        content_type = img_response.headers.get('Content-Type')
+                        # 파일 저장 및 확장자 추가
+                        if content_type == "image/jpeg":
+                            ext = ".jpg"
+                        elif content_type == "image/png":
+                            ext = ".png"
+                        elif content_type == "image/webp":
+                            ext = ".webp"  
+                            
+                        unique_id = uuid.uuid4()
+                        filename = f"{unique_id}{ext}"
                         try:
-                            file_path = super().save_file(img_url, category=category, no=no, alt_text=alt_text)
+                            file_path = super().save_file(img_url, category=category, no=no, alt_text=filename)
                             img_txt = super().img_to_text(file_path)
                             content_list.append({'type': 'image', 'path': file_path, 'content': img_txt})
                         except Exception as e:
