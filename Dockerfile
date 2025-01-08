@@ -12,11 +12,15 @@ RUN pip install poetry
 RUN apt-get update -y
 RUN apt-get install libgl1-mesa-glx -y
 
-# tesseract-ocr
+# Install Tesseract OCR with Korean language support
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
+    tesseract-ocr-kor \
     libtesseract-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Set TESSDATA_PREFIX environment variable
+ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata/
 
 #poetry 관련 파일 복사
 COPY ./pyproject.toml ./poetry.lock* /app/
