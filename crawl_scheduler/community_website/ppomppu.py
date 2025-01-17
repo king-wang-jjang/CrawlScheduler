@@ -56,7 +56,7 @@ class Ppomppu(AbstractCommunityWebsite):
 
                     gpt_obj_id = self.get_gpt_obj((category, no))
                     contents = self.get_board_contents(url=domain+url, category=category, no= no)
-                    self.db_controller.insert_one('RealTime', {
+                    self.db_controller.insert_one('Realtime', {
                         'board_id': (category, no),
                         'site': SITE_PPOMPPU,
                         'title': title,
@@ -121,7 +121,7 @@ class Ppomppu(AbstractCommunityWebsite):
         pass
 
     def _post_already_exists(self, board_id):
-        existing_instance = self.db_controller.find('RealTime', {'board_id': board_id, 'site': SITE_PPOMPPU})
+        existing_instance = self.db_controller.find('Realtime', {'board_id': board_id, 'site': SITE_PPOMPPU})
         return existing_instance
 
     def get_gpt_obj(self, board_id):

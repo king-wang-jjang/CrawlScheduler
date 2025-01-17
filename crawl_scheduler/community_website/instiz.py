@@ -68,7 +68,7 @@ class Instiz(AbstractCommunityWebsite):
                     continue
 
                 try:
-                    existing_instance = self.db_controller.find('RealTime', {'board_id': board_id, 'site': SITE_INSTIZ})
+                    existing_instance = self.db_controller.find('Realtime', {'board_id': board_id, 'site': SITE_INSTIZ})
                     if existing_instance:
                         already_exists_post.append(board_id)
                         continue
@@ -76,7 +76,7 @@ class Instiz(AbstractCommunityWebsite):
                     gpt_obj_id = self.get_gpt_obj(board_id)
                     tag_obj_id = self._get_or_create_tag_object(board_id)
 
-                    self.db_controller.insert_one('RealTime', {
+                    self.db_controller.insert_one('Realtime', {
                         'board_id': board_id,
                         'site': SITE_INSTIZ,
                         'title': title,
@@ -114,7 +114,7 @@ class Instiz(AbstractCommunityWebsite):
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
         }
 
-        daily_instance = self.db_controller.find('RealTime', {'board_id': board_id, 'site': SITE_INSTIZ})
+        daily_instance = self.db_controller.find('Realtime', {'board_id': board_id, 'site': SITE_INSTIZ})
         content_list = []
         if daily_instance:
             try:

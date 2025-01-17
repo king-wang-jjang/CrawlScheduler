@@ -89,7 +89,7 @@ class Dcinside(AbstractCommunityWebsite):
 
                 gpt_obj_id = self._get_or_create_gpt_obj_id(board_id)
 
-                self.db_controller.insert_one('RealTime', {
+                self.db_controller.insert_one('Realtime', {
                     'board_id': board_id,
                     'site': SITE_DCINSIDE,
                     'title': title,
@@ -177,7 +177,7 @@ class Dcinside(AbstractCommunityWebsite):
 
     def _post_exists(self, board_id):
         logger.debug(f"Checking if post {board_id} exists in DB")
-        existing_instance = self.db_controller.find('RealTime', {'board_id': board_id, 'site': SITE_DCINSIDE})
+        existing_instance = self.db_controller.find('Realtime', {'board_id': board_id, 'site': SITE_DCINSIDE})
         return existing_instance is not None
 
     def _get_or_create_gpt_obj_id(self, board_id):

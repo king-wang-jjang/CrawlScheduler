@@ -97,13 +97,13 @@ class Ygosu(AbstractCommunityWebsite):
                     target_datetime = datetime(now.year, now.month, now.day, hour, minute)
 
                     category, no = self.get_category_and_no(url)
-                    if self._post_already_exists((category, no), 'RealTime'):
+                    if self._post_already_exists((category, no), 'Realtime'):
                         already_exists_post.append((category, no))
                         continue
 
                     gpt_obj_id = self.get_gpt_obj((category, no))
                     contents = self.get_board_contents(url=url, category=category, no= no)
-                    self.db_controller.insert_one('RealTime', {
+                    self.db_controller.insert_one('Realtime', {
                         'board_id': (category, no),
                         'site': SITE_YGOSU,
                         'title': title,

@@ -82,7 +82,7 @@ class Theqoo(AbstractCommunityWebsite):
                     gpt_obj_id = self.get_gpt_obj(board_id)
                     tag_obj_id = self._get_or_create_tag_object(board_id)
 
-                    self.db_controller.insert_one('RealTime', {
+                    self.db_controller.insert_one('Realtime', {
                         'board_id': board_id,
                         'site': SITE_THEQOO,
                         'title': title,
@@ -167,7 +167,7 @@ class Theqoo(AbstractCommunityWebsite):
             return None
 
     def _post_already_exists(self, board_id, already_exists_post):
-        existing_instance = self.db_controller.find('RealTime', {'board_id': board_id, 'site': SITE_THEQOO})
+        existing_instance = self.db_controller.find('Realtime', {'board_id': board_id, 'site': SITE_THEQOO})
         if existing_instance:
             already_exists_post.append(board_id)
             return True
