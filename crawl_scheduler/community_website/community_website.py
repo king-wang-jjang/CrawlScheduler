@@ -32,6 +32,10 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
         return {}
 
     @abstractmethod
+    def is_ad(self, title) -> str:
+        pass
+
+    @abstractmethod
     def save_file(self, url, category, no, alt_text=None):
         child_class_name = self.__class__.__name__
         path = os.path.join(Config().get_env('ROOT'), child_class_name, str(category), str(no))

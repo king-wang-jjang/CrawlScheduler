@@ -37,6 +37,9 @@ class Ppomppu(AbstractCommunityWebsite):
 
                 if title_element:
                     title = title_element.get_text(strip=True)
+                    if (self.is_ad(title=title)):
+                        continue
+
                     domain = "https://ppomppu.co.kr"
                     url = title_element['href']
                     category, no = self.get_category_and_no(url)
@@ -73,6 +76,11 @@ class Ppomppu(AbstractCommunityWebsite):
 
         data = {"rank": {i + 1: item for i, item in enumerate(result)}}
         return data
+    
+    def is_ad(self, title) -> bool:
+        if not title.startswith("AD"):
+            return False
+        return True
 
     def get_category_and_no(self, url):
         pattern = r"id=([^&]*)&no=([^&]*)"
