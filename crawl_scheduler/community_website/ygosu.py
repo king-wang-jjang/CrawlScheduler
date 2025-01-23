@@ -34,6 +34,7 @@ class Ygosu(AbstractCommunityWebsite):
 
                 if tit_element and create_time_element and rank_element:
                     title = tit_element.get_text(strip=True)
+                    i
                     rank = rank_element.get_text(strip=True)
                     create_time = create_time_element.get_text(strip=True)
 
@@ -86,6 +87,7 @@ class Ygosu(AbstractCommunityWebsite):
 
                 if tit_element and create_time_element:
                     title = tit_element.get_text(strip=True)
+                    # is_ad()
                     create_time = create_time_element.get_text(strip=True)
 
                     if not create_time or ':' not in create_time:  # 광고 및 공지 제외
@@ -171,6 +173,9 @@ class Ygosu(AbstractCommunityWebsite):
                 logger.error(f"Error fetching board contents for {no}: {e}")
 
         return content_list
+    
+    def is_ad(self, title) -> bool:
+        pass
     
     def save_file(self, url):
         pass

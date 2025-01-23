@@ -32,7 +32,7 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
         return {}
 
     @abstractmethod
-    def is_ad(self, title) -> str:
+    def is_ad(self, title) -> bool:
         pass
 
     @abstractmethod
