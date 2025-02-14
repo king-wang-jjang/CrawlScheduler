@@ -21,7 +21,6 @@ class Theqoo(AbstractCommunityWebsite):
         pass
     
     def get_real_time_best(self):
-        logger.info("Fetching real-time best posts from Theqoo")
         category = 'hot'  # theqoo는 카테고리를 hot으로 단일 고정 (20250214)
         try:
             req = requests.get('https://theqoo.net/hot', headers=self.g_headers[0])

@@ -2,8 +2,7 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-import sys
-
+from crawl_scheduler.community_website.dcinside import Dcinside
 from crawl_scheduler.community_website.ppomppu import Ppomppu
 from crawl_scheduler.community_website.theqoo import Theqoo
 from crawl_scheduler.community_website.ygosu import Ygosu
@@ -12,7 +11,9 @@ from crawl_scheduler.utils.loghandler import logger
 # board_semaphores = {}
 
 def get_real_time_best():
-    crawl_List = [Ygosu(), Ppomppu(), Theqoo()]
+    crawl_List = [Dcinside()]
+    # crawl_List = [ Theqoo()]
+    # crawl_List = [Ygosu(), Ppomppu(), Theqoo()]
     success_status = {}
 
     for crawl in crawl_List:
@@ -40,6 +41,7 @@ def job():
     get_real_time_best()
 
 if __name__ == "__main__":
+    Dcinside().get_real_time_best()
     schedule.every(1).minutes.do(job)  # 5분마다 실행
 
     while True:
