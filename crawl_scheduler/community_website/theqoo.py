@@ -71,13 +71,13 @@ class Theqoo(AbstractCommunityWebsite):
                     logger.info(f"Post {no} inserted successfully")
                 except Exception as e:
                     logger.error(f"Error processing post {no}: {e}")
-
+        
         logger.info({"already exists post": already_exists_post})
+        return True
 
-    def get_board_contents(self, no):
-        logger.info(f"Fetching board contents for board_id: {no}")
-
+    def get_board_contents(self, category= None, no=None, url=None):
         _url = "https://theqoo.net/hot/" + no
+        content_list = []
         try:
             req = requests.get(_url, headers=self.g_headers[0])
             req.raise_for_status()
@@ -88,9 +88,24 @@ class Theqoo(AbstractCommunityWebsite):
 
             if write_div:
                 find_all = write_div.find_all(['p', 'div'])
-                for element in find_all:
-                    text_content = element.text.strip()
-                    content_list.append({'type': 'text', 'content': text_content})
+                for p in find_all:
+                    if p.find('img'):
+                        img_url = p.find('img')['src']
+                        try:
+                            file_path = super().save_file(img_url, category=category, no=no)
+                            img_txt = super().img_to_text(file_path)
+                            content_list.append({'type': 'image', 'path': file_path, 'content': img_txt})
+                        except Exception as e:
+                            logger.error(f"Error processing image: {url} {e}")
+                    elif p.find('video'):
+                        video_url = "https:" + p.find('video').find('source')['src']
+                        try:
+                            file_path = super().save_file(video_url, category=category, no=no)
+                            content_list.append({'type': 'video', 'path': file_path})
+                        except Exception as e:
+                            logger.error(f"Error saving video: {e}")
+                    else:
+                        content_list.append({'type': 'text', 'content': p.text.strip()})
             return content_list
         except Exception as e:
             logger.error(f"Error fetching board contents for {no}: {e}")

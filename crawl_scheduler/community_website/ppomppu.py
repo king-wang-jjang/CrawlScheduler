@@ -75,8 +75,7 @@ class Ppomppu(AbstractCommunityWebsite):
 
         logger.info({"already exists post": already_exists_post})
 
-        data = {"rank": {i + 1: item for i, item in enumerate(result)}}
-        return data
+        return True
     
     def is_ad(self, title) -> bool:
         if not title.startswith("AD"):
