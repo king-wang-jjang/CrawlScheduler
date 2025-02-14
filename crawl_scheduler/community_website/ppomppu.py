@@ -17,6 +17,8 @@ class Ppomppu(AbstractCommunityWebsite):
 
     def get_real_time_best(self):
         _url = f"https://www.ppomppu.co.kr/hot.php?id=&page=1&category=999"
+        domain = "https://ppomppu.co.kr"
+
         try:
             response = requests.get(_url)
             response.raise_for_status()
@@ -40,7 +42,6 @@ class Ppomppu(AbstractCommunityWebsite):
                     if (self.is_ad(title=title)):
                         continue
 
-                    domain = "https://ppomppu.co.kr"
                     url = title_element['href']
                     category, no = self.get_category_and_no(url)
                     no = int(no)

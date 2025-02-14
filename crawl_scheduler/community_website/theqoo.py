@@ -1,28 +1,12 @@
-from datetime import datetime
-import os
+import re
 from bs4 import BeautifulSoup
 import requests
+from datetime import datetime
 from crawl_scheduler.db.mongo_controller import MongoController
-from crawl_scheduler.services.web_crawling.community_website.community_website import AbstractCommunityWebsite
+from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_THEQOO, DEFAULT_TAG
-from crawl_scheduler.utils import FTPClient
-from crawl_scheduler.config import Config
-from crawl_scheduler.utils.loghandler import catch_exception
-import sys
-
-sys.excepthook = catch_exception
-
-# selenium
-from selenium import webdriver
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
-import logging
-from crawl_scheduler.utils.loghandler import crawler_logger
-
-logger = crawler_logger()
-
+import os
+from crawl_scheduler.utils.loghandler import logger
 
 class Theqoo(AbstractCommunityWebsite):
     g_headers = [
@@ -31,23 +15,14 @@ class Theqoo(AbstractCommunityWebsite):
     ]
 
     def __init__(self):
-        self.yyyymmdd = datetime.today().strftime('%Y%m%d')
         self.db_controller = MongoController()
-        try:
-            logger.info(f"Initializing Theqoo crawler for date {self.yyyymmdd}")
-            self.ftp_client = FTPClient.FTPClient(
-                server_address=Config().get_env('FTP_HOST'),
-                username=Config().get_env('FTP_USERNAME'),
-                password=Config().get_env('FTP_PASSWORD')
-            )
-            super().__init__(self.yyyymmdd, self.ftp_client)
-            logger.info("Theqoo initialized successfully")
-        except Exception as e:
-            logger.error(f"Error initializing Theqoo: {e}")
+   
     def get_daily_best(self):
         pass
+    
     def get_real_time_best(self):
         logger.info("Fetching real-time best posts from Theqoo")
+        category = 'hot'  # theqoo는 카테고리를 hot으로 단일 고정 (20250214)
         try:
             req = requests.get('https://theqoo.net/hot', headers=self.g_headers[0])
             req.raise_for_status()
@@ -57,15 +32,17 @@ class Theqoo(AbstractCommunityWebsite):
         except Exception as e:
             logger.error(f"Error fetching Theqoo hot page: {e}")
             return
-
+   
         already_exists_post = []
+        result = []
+
         for li in li_elements:
             elements = li.find_all('td')
             if len(elements) > 1:
                 try:
                     title = elements[2].get_text(strip=True)
                     url = "https://theqoo.net" + elements[2].find('a')['href']
-                    board_id = url.split('hot/')[-1]
+                    no = url.split('hot/')[-1]
                     time_text = elements[3].get_text(strip=True)
 
                     if '-' in time_text:
@@ -76,33 +53,31 @@ class Theqoo(AbstractCommunityWebsite):
                     target_datetime = datetime(now.year, now.month, now.day, hour, minute)
 
                     # Check if post already exists in DB
-                    if self._post_already_exists(board_id, already_exists_post):
+                    if self._post_already_exists(no, already_exists_post):
                         continue
 
-                    gpt_obj_id = self.get_gpt_obj(board_id)
-                    tag_obj_id = self._get_or_create_tag_object(board_id)
-
+                    gpt_obj_id = self.get_gpt_obj(no)
+                    
+                    contents = self.get_board_contents(url=url, category=category, no=no)
                     self.db_controller.insert_one('Realtime', {
-                        'board_id': board_id,
+                        'board_id': (category, no),
                         'site': SITE_THEQOO,
                         'title': title,
                         'url': url,
                         'create_time': target_datetime,
                         'GPTAnswer': gpt_obj_id,
-                        'Tag': tag_obj_id
+                        'contents': contents
                     })
-                    logger.info(f"Post {board_id} inserted successfully")
+                    logger.info(f"Post {no} inserted successfully")
                 except Exception as e:
-                    logger.error(f"Error processing post {board_id}: {e}")
+                    logger.error(f"Error processing post {no}: {e}")
 
         logger.info({"already exists post": already_exists_post})
 
-    def get_board_contents(self, board_id):
-        logger.info(f"Fetching board contents for board_id: {board_id}")
-        abs_path = f'./{self.yyyymmdd}/{board_id}'
-        self.download_path = os.path.abspath(abs_path)
+    def get_board_contents(self, no):
+        logger.info(f"Fetching board contents for board_id: {no}")
 
-        _url = "https://theqoo.net/hot/" + board_id
+        _url = "https://theqoo.net/hot/" + no
         try:
             req = requests.get(_url, headers=self.g_headers[0])
             req.raise_for_status()
@@ -118,31 +93,10 @@ class Theqoo(AbstractCommunityWebsite):
                     content_list.append({'type': 'text', 'content': text_content})
             return content_list
         except Exception as e:
-            logger.error(f"Error fetching board contents for {board_id}: {e}")
+            logger.error(f"Error fetching board contents for {no}: {e}")
             return []
 
-    def set_driver_options(self):
-        chrome_options = Options()
-        prefs = {"download.default_directory": self.download_path}
-        chrome_options.add_experimental_option("prefs", prefs)
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-setuid-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
-
-        if not os.path.exists(self.download_path):
-            os.makedirs(self.download_path)
-
-        self.driver = webdriver.Chrome(options=chrome_options)
-        try:
-            self.driver.get("https://www.theqoo.com/")
-            WebDriverWait(self.driver, 5).until(EC.presence_of_element_located((By.XPATH, '//body')))
-            logger.info("Selenium driver initialized and page loaded")
-        except Exception as e:
-            logger.error(f"Error initializing Selenium driver: {e}")
-        return True
-
-    def save_img(self, url):
+    def save_file(self, url):
         if not os.path.exists(self.download_path):
             os.makedirs(self.download_path)
 
@@ -155,9 +109,7 @@ class Theqoo(AbstractCommunityWebsite):
                 link.click();
             '''
             self.driver.execute_script(script)
-            WebDriverWait(self.driver, 5).until(
-                lambda x: len(os.listdir(self.download_path)) > initial_file_count
-            )
+
 
             newest_file = max(os.listdir(self.download_path),
                               key=lambda x: os.path.getctime(os.path.join(self.download_path, x)))
@@ -196,3 +148,6 @@ class Theqoo(AbstractCommunityWebsite):
                 'Tag': DEFAULT_TAG
             })
             return tag_obj.inserted_id
+
+    def is_ad():
+        pass
