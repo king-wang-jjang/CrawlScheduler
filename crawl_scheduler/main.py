@@ -11,9 +11,7 @@ from crawl_scheduler.utils.loghandler import logger
 # board_semaphores = {}
 
 def get_real_time_best():
-    crawl_List = [Dcinside()]
-    # crawl_List = [ Theqoo()]
-    # crawl_List = [Ygosu(), Ppomppu(), Theqoo()]
+    crawl_List = [Ygosu(), Ppomppu(), Theqoo(), Dcinside()]
     success_status = {}
 
     for crawl in crawl_List:
@@ -41,7 +39,6 @@ def job():
     get_real_time_best()
 
 if __name__ == "__main__":
-    Dcinside().get_real_time_best()
     schedule.every(1).minutes.do(job)  # 5분마다 실행
 
     while True:
