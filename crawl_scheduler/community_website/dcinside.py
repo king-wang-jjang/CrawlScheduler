@@ -1,24 +1,12 @@
-import os
-import logging
-from datetime import datetime
-import requests
+import re
 from bs4 import BeautifulSoup
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
-from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_DCINSIDE
+import requests
+from datetime import datetime
 from crawl_scheduler.db.mongo_controller import MongoController
-from crawl_scheduler.services.web_crawling.community_website.community_website import AbstractCommunityWebsite
-from crawl_scheduler.utils import FTPClient
-from crawl_scheduler.config import Config
-
-# selenium
-from selenium import webdriver
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
-
-logger = logging.getLogger(__name__)
+from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
+from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_DCINSIDE, DEFAULT_TAG
+import os
+from crawl_scheduler.utils.loghandler import logger
 
 
 class Dcinside(AbstractCommunityWebsite):
@@ -28,98 +16,100 @@ class Dcinside(AbstractCommunityWebsite):
     ]
 
     def __init__(self):
-        self.yyyymmdd = datetime.today().strftime('%Y%m%d')
         self.db_controller = MongoController()
-        try:
-            logger.info("Initializing Dcinside instance")
-            self.ftp_client = FTPClient.FTPClient(
-                server_address=Config().get_env('FTP_HOST'),
-                username=Config().get_env('FTP_USERNAME'),
-                password=Config().get_env('FTP_PASSWORD'))
-            super().__init__(self.yyyymmdd, self.ftp_client)
-            logger.info("Dcinside initialized successfully")
-        except Exception as e:
-            logger.error("Dcinside initialization error: %s", e)
-            raise
+ 
     def get_daily_best(self):
         pass
+
     def get_real_time_best(self):
-        logger.info("Fetching real-time best posts")
         try:
-            req = requests.get('https://www.dcinside.com/', headers=self.g_headers[0])
+            req = requests.get('https://gall.dcinside.com/board/lists/?id=dcbest', headers=self.g_headers[0])
             req.raise_for_status()  # Check for HTTP errors
             html_content = req.text
             soup = BeautifulSoup(html_content, 'html.parser')
-            li_elements = soup.select('#dcbest_list_date li')
+            tr_elements = soup.select('tr.ub-content') # 첫번 째는 쓰레기 값
             already_exists_post = []
 
-            with ThreadPoolExecutor(max_workers=10) as executor:
-                futures = [executor.submit(self._process_li_element, li) for li in li_elements]
-                for future in as_completed(futures):
-                    result = future.result()
-                    if result:
-                        already_exists_post.append(result)
-
-            logger.info("Already exists post: %s", already_exists_post)
         except Exception as e:
-            logger.error("Error fetching real-time best posts: %s", e)
+            logger.error("fetching real-time best posts: %s", e)
 
-    def _process_li_element(self, li):
-        logger.debug("Processing individual post element")
-        try:
-            p_element = li.select_one('.box.besttxt p')
-            a_element = li.select_one('.main_log')
-            time_element = li.select_one('.box.best_info .time')
+        for tr in tr_elements:
+            try:
+                # URL 추출 (url)
+                a_tag = tr.find('a', href=True)
+                if a_tag:
+                    gall_num_td = tr.find('td', class_='gall_num')
+                    if (self.is_ad(gall_num_td)):
+                        continue
 
-            if p_element and a_element and time_element:
-                title = p_element.get_text(strip=True)
-                url = a_element['href']
-                board_id = url.split('no=')[-1]
-                time_text = time_element.get_text(strip=True)
+                    url = "https://gall.dcinside.com" + a_tag['href']
+                    url_parts = url.split('?id=')[1].split('&no=')
+                    category = url_parts[0]
+                    no = url_parts[1].split('&')[0]
+                    title = a_tag.get_text(strip=True)
+                    time_tag = tr.find('td', class_='gall_date')
+                    if time_tag:
+                        time_str = time_tag.get_text(strip=True)
+                        # 만약 이미 날짜가 포함되어 있다면(예: '2025-02-17 02.16')
+                        if '-' in time_str:
+                            # 시간 부분에 콜론 대신 점이 사용되었다면 변환
+                            parts = time_str.split()
+                            if len(parts) == 2:
+                                date_part, time_part = parts
+                                if '.' in time_part and ':' not in time_part:
+                                    time_part = time_part.replace('.', ':')
+                                datetime_str = f"{date_part} {time_part}"
+                            else:
+                                datetime_str = time_str
+                        else:
+                            # 시간만 있다면 오늘 날짜와 결합 (예: '16:55' 또는 '02.16')
+                            if '.' in time_str and ':' not in time_str:
+                                time_str = time_str.replace('.', ':')
+                            today_date = datetime.today().strftime('%Y-%m-%d')
+                            datetime_str = f"{today_date} {time_str}"
+                        try:
+                            time_obj = datetime.strptime(datetime_str, '%Y-%m-%d %H:%M')
+                        except ValueError:
+                            time_obj = None
+                    else:
+                        time_obj = None  # 시간을 찾지 못한 경우 None
 
-                if '-' in time_text:
-                    logger.debug("Post is not from today, skipping")
-                    return None  # 오늘 것만 추가 (이전 글은 제외)
+                    if self._post_already_exists((category, no)):
+                        already_exists_post.append((category, no))
+                        continue
 
-                target_datetime = self._get_target_datetime(time_text)
+                    gpt_obj_id = self.get_gpt_obj((category, no))
+                    contents = self.get_board_contents(url=url, category=category, no= no)
+                    self.db_controller.insert_one('Realtime', {
+                        'board_id': (category, no),
+                        'site': SITE_DCINSIDE,
+                        'title': title,
+                        'url': url,
+                        'create_time': time_obj,
+                        'gpt_answer': gpt_obj_id,
+                        'contents': contents
+                    })
+                    logger.info(f"Post {(category, no)} inserted successfully")
+            except Exception as e:
+                logger.error(f"Error processing post{(no, category)}{url}: {e}")
 
-                if self._post_exists(board_id):
-                    logger.info(f"Post {board_id} already exists in DB")
-                    return board_id
+        logger.info("Already exists post: %s", already_exists_post)
 
-                gpt_obj_id = self._get_or_create_gpt_obj_id(board_id)
 
-                self.db_controller.insert_one('Realtime', {
-                    'board_id': board_id,
-                    'site': SITE_DCINSIDE,
-                    'title': title,
-                    'url': url,
-                    'create_time': target_datetime,
-                    'GPTAnswer': gpt_obj_id
-                })
-                logger.info(f"Post {board_id} added to DB")
-        except Exception as e:
-            logger.error("Error processing post element: %s", e)
-        return None
+    def get_board_contents(self, category= None, no=None, url=None):
+        # try:
+        #     respone = requests.get(url, headers=self.g_headers[0])
+        #     respone.raise_for_status()
+        #     soup = BeautifulSoup(respone.text, 'html.parser')
+        #     board_body = soup.find('div', class_='write_div')
+        #     paragraphs = board_body.find_all('p')
 
-    def get_board_contents(self, board_id):
-        logger.info(f"Fetching board contents for board_id: {board_id}")
-        abs_path = f'./{self.yyyymmdd}/{board_id}'
-        self.download_path = os.path.abspath(abs_path)
-        _url = "https://gall.dcinside.com/board/view/?id=dcbest&no=" + board_id
-
-        try:
-            req = requests.get(_url, headers=self.g_headers[0])
-            req.raise_for_status()
-            html_content = req.text
-            soup = BeautifulSoup(html_content, 'html.parser')
-
-            content_list = self._parse_content(soup)
-            logger.info(f"Content fetched for board_id {board_id}")
-            return content_list
-        except Exception as e:
-            logger.error(f"Error fetching board contents for {board_id}: %s", e)
-            return []
+            # content_list = self._parse_content(soup)
+            # return content_list
+        
+        # except Exception as e:
+            # logger.error(f"Error fetching board contents for {no if no else url}: {e}")
+        return {"text": "dcinside는 지원하지 않습니다."}
 
     def set_driver_options(self):
         logger.info("Setting up Chrome driver options for Selenium")
@@ -210,3 +200,28 @@ class Dcinside(AbstractCommunityWebsite):
         files = os.listdir(directory)
         newest_file = max(files, key=lambda x: os.path.getctime(os.path.join(directory, x)))
         return newest_file
+
+    def get_gpt_obj(self, board_id):
+        gpt_exists = self.db_controller.find('GPT', {'board_id': board_id, 'site': SITE_DCINSIDE})
+        if gpt_exists:
+            return gpt_exists[0]['_id']
+        else:
+            gpt_obj = self.db_controller.insert_one('GPT', {
+                'board_id': board_id,
+                'site': SITE_DCINSIDE,
+                'answer': DEFAULT_GPT_ANSWER,
+                'tag': DEFAULT_TAG
+            })
+            return gpt_obj.inserted_id
+        
+    def is_ad(self, title) -> bool:
+        if title and title.get_text(strip=True) in ['공지', '설문']:
+            return True
+        return False
+
+    def save_file(self, url, category, no, alt_text=None):
+        pass
+
+    def _post_already_exists(self, board_id):
+        existing_instance = self.db_controller.find('Realtime', {'board_id': board_id, 'site': SITE_DCINSIDE})
+        return existing_instance

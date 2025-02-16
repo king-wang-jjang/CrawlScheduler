@@ -1,21 +1,17 @@
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
-# from fastapi.responses import JSONResponse
 
-import sys
-
-# from crawl_scheduler.community_website.instiz import Instiz
+from crawl_scheduler.community_website.dcinside import Dcinside
 from crawl_scheduler.community_website.ppomppu import Ppomppu
-# from crawl_scheduler.community_website.ruliweb import Ruliweb
-# from crawl_scheduler.community_website.theqoo import Theqoo
+from crawl_scheduler.community_website.theqoo import Theqoo
 from crawl_scheduler.community_website.ygosu import Ygosu
 from crawl_scheduler.utils.loghandler import logger
 
 # board_semaphores = {}
 
 def get_real_time_best():
-    crawl_List = [Ygosu(), Ppomppu()]
+    crawl_List = [Ygosu(), Ppomppu(), Theqoo(), Dcinside()]
     success_status = {}
 
     for crawl in crawl_List:
@@ -43,8 +39,9 @@ def job():
     get_real_time_best()
 
 if __name__ == "__main__":
-    schedule.every(5).minutes.do(job)  # 5분마다 실행
+    schedule.every(1).minutes.do(job)  # 5분마다 실행
 
     while True:
         schedule.run_pending()
+        
         time.sleep(1)
