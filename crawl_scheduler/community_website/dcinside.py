@@ -42,7 +42,7 @@ class Dcinside(AbstractCommunityWebsite):
                     if (self.is_ad(gall_num_td)):
                         continue
 
-                    url = a_tag['href']
+                    url = "https://gall.dcinside.com" + a_tag['href']
                     url_parts = url.split('?id=')[1].split('&no=')
                     category = url_parts[0]
                     no = url_parts[1].split('&')[0]
@@ -50,15 +50,30 @@ class Dcinside(AbstractCommunityWebsite):
                     time_tag = tr.find('td', class_='gall_date')
                     if time_tag:
                         time_str = time_tag.get_text(strip=True)
-                        # 오늘 날짜로 시간과 결합
-                        today_date = datetime.today().strftime('%Y-%m-%d')  # 오늘 날짜를 YYYY-MM-DD 형식으로
-                        datetime_str = f"{today_date} {time_str}"
-                        # datetime 객체로 변환
-                        time = datetime.strptime(datetime_str, '%Y-%m-%d %H:%M')
+                        # 만약 이미 날짜가 포함되어 있다면(예: '2025-02-17 02.16')
+                        if '-' in time_str:
+                            # 시간 부분에 콜론 대신 점이 사용되었다면 변환
+                            parts = time_str.split()
+                            if len(parts) == 2:
+                                date_part, time_part = parts
+                                if '.' in time_part and ':' not in time_part:
+                                    time_part = time_part.replace('.', ':')
+                                datetime_str = f"{date_part} {time_part}"
+                            else:
+                                datetime_str = time_str
+                        else:
+                            # 시간만 있다면 오늘 날짜와 결합 (예: '16:55' 또는 '02.16')
+                            if '.' in time_str and ':' not in time_str:
+                                time_str = time_str.replace('.', ':')
+                            today_date = datetime.today().strftime('%Y-%m-%d')
+                            datetime_str = f"{today_date} {time_str}"
+                        try:
+                            time_obj = datetime.strptime(datetime_str, '%Y-%m-%d %H:%M')
+                        except ValueError:
+                            time_obj = None
                     else:
-                        time = datetime.now()  # 시간을 찾지 못한 경우 None
+                        time_obj = None  # 시간을 찾지 못한 경우 None
 
-                                    # Check if the post already exists
                     if self._post_already_exists((category, no)):
                         already_exists_post.append((category, no))
                         continue
@@ -70,7 +85,7 @@ class Dcinside(AbstractCommunityWebsite):
                         'site': SITE_DCINSIDE,
                         'title': title,
                         'url': url,
-                        'create_time': time,
+                        'create_time': time_obj,
                         'gpt_answer': gpt_obj_id,
                         'contents': contents
                     })
@@ -81,24 +96,20 @@ class Dcinside(AbstractCommunityWebsite):
         logger.info("Already exists post: %s", already_exists_post)
 
 
-    def get_board_contents(self, board_id):
-        logger.info(f"Fetching board contents for board_id: {board_id}")
-        abs_path = f'./{self.yyyymmdd}/{board_id}'
-        self.download_path = os.path.abspath(abs_path)
-        _url = "https://gall.dcinside.com/board/view/?id=dcbest&no=" + board_id
+    def get_board_contents(self, category= None, no=None, url=None):
+        # try:
+        #     respone = requests.get(url, headers=self.g_headers[0])
+        #     respone.raise_for_status()
+        #     soup = BeautifulSoup(respone.text, 'html.parser')
+        #     board_body = soup.find('div', class_='write_div')
+        #     paragraphs = board_body.find_all('p')
 
-        try:
-            req = requests.get(_url, headers=self.g_headers[0])
-            req.raise_for_status()
-            html_content = req.text
-            soup = BeautifulSoup(html_content, 'html.parser')
-
-            content_list = self._parse_content(soup)
-            logger.info(f"Content fetched for board_id {board_id}")
-            return content_list
-        except Exception as e:
-            logger.error(f"Error fetching board contents for {board_id}: %s", e)
-            return []
+            # content_list = self._parse_content(soup)
+            # return content_list
+        
+        # except Exception as e:
+            # logger.error(f"Error fetching board contents for {no if no else url}: {e}")
+        return {"text": "dcinside는 지원하지 않습니다."}
 
     def set_driver_options(self):
         logger.info("Setting up Chrome driver options for Selenium")
@@ -191,7 +202,7 @@ class Dcinside(AbstractCommunityWebsite):
         return newest_file
 
     def get_gpt_obj(self, board_id):
-        gpt_exists = self.db_controller.find('GPT', {'board_id': board_id, 'site': SITE_PPOMPPU})
+        gpt_exists = self.db_controller.find('GPT', {'board_id': board_id, 'site': SITE_DCINSIDE})
         if gpt_exists:
             return gpt_exists[0]['_id']
         else:
@@ -210,3 +221,7 @@ class Dcinside(AbstractCommunityWebsite):
 
     def save_file(self, url, category, no, alt_text=None):
         pass
+
+    def _post_already_exists(self, board_id):
+        existing_instance = self.db_controller.find('Realtime', {'board_id': board_id, 'site': SITE_DCINSIDE})
+        return existing_instance
