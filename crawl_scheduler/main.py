@@ -39,7 +39,7 @@ def job():
     get_real_time_best()
 
 if __name__ == "__main__":
-    schedule.every(1).minutes.do(job)  # 5분마다 실행
+    schedule.every(5).minutes.do(job)  # 5분마다 실행
 
     while True:
         schedule.run_pending()
