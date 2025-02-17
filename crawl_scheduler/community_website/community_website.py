@@ -53,7 +53,7 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
             index += 1
         with open(file_path, 'wb') as f:
             f.write(requests.get(url).content)
-        return file_path
+        return os.path.join(child_class_name, str(category), str(no))
 
     @abstractmethod
     def get_gpt_obj(self, url):
