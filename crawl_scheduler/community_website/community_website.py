@@ -38,22 +38,32 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
     @abstractmethod
     def save_file(self, url, category, no, alt_text=None):
         child_class_name = self.__class__.__name__
-        path = os.path.join(Config().get_env('ROOT'), child_class_name, str(category), str(no))
+        root_path = Config().get_env('ROOT')
+        path = os.path.join(root_path, child_class_name, str(category), str(no))
+        
         logger.info(f"Saving image from URL: {url}")
         os.makedirs(path, exist_ok=True)
+        
         if alt_text:
             file_name = alt_text
         else:
             file_name = os.path.basename(url)
+        
         file_name_without_extension, file_extension = os.path.splitext(file_name)
         file_path = os.path.join(path, file_name)
+        
         index = 1
         while os.path.exists(file_path):
             file_path = os.path.join(path, f"{file_name_without_extension}_{index}{file_extension}")
             index += 1
+        
         with open(file_path, 'wb') as f:
             f.write(requests.get(url).content)
-        return os.path.join(child_class_name, str(category), str(no), file_name)
+        
+        # ROOT 경로를 제거하여 상대 경로 반환
+        relative_path = os.path.relpath(file_path, root_path)
+        
+        return relative_path
 
     @abstractmethod
     def get_gpt_obj(self, url):
