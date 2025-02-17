@@ -3,6 +3,7 @@ import os
 from typing import Tuple
 from bs4 import BeautifulSoup
 import requests
+from crawl_scheduler.config import Config
 from crawl_scheduler.db.mongo_controller import MongoController
 from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_YGOSU, DEFAULT_TAG
@@ -34,7 +35,6 @@ class Ygosu(AbstractCommunityWebsite):
 
                 if tit_element and create_time_element and rank_element:
                     title = tit_element.get_text(strip=True)
-                    i
                     rank = rank_element.get_text(strip=True)
                     create_time = create_time_element.get_text(strip=True)
 
@@ -87,7 +87,6 @@ class Ygosu(AbstractCommunityWebsite):
 
                 if tit_element and create_time_element:
                     title = tit_element.get_text(strip=True)
-                    # is_ad()
                     create_time = create_time_element.get_text(strip=True)
 
                     if not create_time or ':' not in create_time:  # 광고 및 공지 제외
@@ -99,13 +98,13 @@ class Ygosu(AbstractCommunityWebsite):
                     target_datetime = datetime(now.year, now.month, now.day, hour, minute)
 
                     category, no = self.get_category_and_no(url)
-                    if self._post_already_exists((category, no), 'Realtime'):
+                    if self._post_already_exists((category, no), 'RealTime'):
                         already_exists_post.append((category, no))
                         continue
 
                     gpt_obj_id = self.get_gpt_obj((category, no))
                     contents = self.get_board_contents(url=url, category=category, no= no)
-                    self.db_controller.insert_one('Realtime', {
+                    self.db_controller.insert_one('RealTime', {
                         'board_id': (category, no),
                         'site': SITE_YGOSU,
                         'title': title,
@@ -151,7 +150,7 @@ class Ygosu(AbstractCommunityWebsite):
                         filename = f"{unique_id}{ext}"
                         try:
                             file_path = super().save_file(img_url, category=category, no=no, alt_text=filename)
-                            img_txt = super().img_to_text(file_path)
+                            img_txt = super().img_to_text(os.path.join(Config().get_env('ROOT'), file_path))
                             content_list.append({'type': 'image', 'path': file_path, 'content': img_txt})
                         except Exception as e:
                             logger.error(f"Error processing image {img_url}: {e}")
@@ -173,9 +172,6 @@ class Ygosu(AbstractCommunityWebsite):
                 logger.error(f"Error fetching board contents for {no}: {e}")
 
         return content_list
-    
-    def is_ad(self, title) -> bool:
-        pass
     
     def save_file(self, url):
         pass
