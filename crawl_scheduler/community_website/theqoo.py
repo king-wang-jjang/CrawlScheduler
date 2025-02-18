@@ -2,6 +2,7 @@ import re
 from bs4 import BeautifulSoup
 import requests
 from datetime import datetime
+from crawl_scheduler.config import Config
 from crawl_scheduler.db.mongo_controller import MongoController
 from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_THEQOO, DEFAULT_TAG
@@ -92,7 +93,7 @@ class Theqoo(AbstractCommunityWebsite):
                         img_url = p.find('img')['src']
                         try:
                             file_path = super().save_file(img_url, category=category, no=no)
-                            img_txt = super().img_to_text(file_path)
+                            img_txt = super().img_to_text(os.path.join(Config().get_env('ROOT')), file_path)
                             content_list.append({'type': 'image', 'path': file_path, 'content': img_txt})
                         except Exception as e:
                             logger.error(f"Error processing image: {url} {e}")
