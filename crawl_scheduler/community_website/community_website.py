@@ -108,6 +108,6 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
             logger.info(f"Text extraction successful for {img_path}.")
         except Exception as e:
             logger.exception(f"Error during image-to-text conversion for {img_path}: {str(e)}")
-            raise e
+            return None
 
         return text
