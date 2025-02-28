@@ -16,7 +16,7 @@ class Ppomppu(AbstractCommunityWebsite):
     def get_daily_best(self):
         pass
 
-    def get_real_time_best(self):
+    def get_realtime_best(self):
         _url = f"https://www.ppomppu.co.kr/hot.php?id=&page=1&category=999"
         domain = "https://ppomppu.co.kr"
 

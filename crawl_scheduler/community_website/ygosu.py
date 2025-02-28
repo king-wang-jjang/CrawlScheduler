@@ -69,7 +69,7 @@ class Ygosu(AbstractCommunityWebsite):
 
         logger.info({"already exists post": already_exists_post})
 
-    def get_real_time_best(self):
+    def get_realtime_best(self):
         try:
             req = requests.get('https://ygosu.com/board/real_article')
             req.raise_for_status()

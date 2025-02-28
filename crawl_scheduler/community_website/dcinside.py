@@ -21,7 +21,7 @@ class Dcinside(AbstractCommunityWebsite):
     def get_daily_best(self):
         pass
 
-    def get_real_time_best(self):
+    def get_realtime_best(self):
         try:
             req = requests.get('https://gall.dcinside.com/board/lists/?id=dcbest', headers=self.g_headers[0])
             req.raise_for_status()  # Check for HTTP errors

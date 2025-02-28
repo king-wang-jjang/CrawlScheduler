@@ -11,6 +11,9 @@ class Database:
     escaped_user = quote_plus(db_user)
     escaped_password = quote_plus(db_password)
     client = MongoClient(f'mongodb://{escaped_user}:{escaped_password}@{db_host}/{db_name}?authMechanism=SCRAM-SHA-256')
+    # client = MongoClient(
+    #     f'mongodb://{escaped_user}:{escaped_password}@{db_host}:27017/{db_name}?authSource=kingwangjjang&authMechanism=SCRAM-SHA-256'
+    # )
     db = client.get_default_database()
 
     @staticmethod

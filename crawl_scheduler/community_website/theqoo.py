@@ -21,7 +21,7 @@ class Theqoo(AbstractCommunityWebsite):
     def get_daily_best(self):
         pass
     
-    def get_real_time_best(self):
+    def get_realtime_best(self):
         category = 'hot'  # theqoo는 카테고리를 hot으로 단일 고정 (20250214)
         try:
             req = requests.get('https://theqoo.net/hot', headers=self.g_headers[0])
