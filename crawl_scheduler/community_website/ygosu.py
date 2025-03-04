@@ -70,55 +70,32 @@ class Ygosu(AbstractCommunityWebsite):
         logger.info({"already exists post": already_exists_post})
 
     def get_realtime_best(self):
-        try:
-            req = requests.get('https://ygosu.com/board/real_article')
-            req.raise_for_status()
-            soup = BeautifulSoup(req.text, 'html.parser')
-        except Exception as e:
-            logger.error(f"Error fetching Ygosu real-time best: {e}")
-            return
-
         already_exists_post = []
-
-        for tr in soup.find_all('tr'):
+        board_list = self.get_board_list()  # 🔹 분리한 함수 호출
+        for url, target_datetime, category, no, title in board_list:
             try:
-                tit_element = tr.select_one('.tit a')
-                create_time_element = tr.select_one('.date')
+                if self._post_already_exists((category, no), 'Realtime'):
+                    already_exists_post.append((category, no))
+                    continue
 
-                if tit_element and create_time_element:
-                    title = tit_element.get_text(strip=True)
-                    create_time = create_time_element.get_text(strip=True)
-
-                    if not create_time or ':' not in create_time:  # 광고 및 공지 제외
-                        continue
-
-                    url = tit_element['href']
-                    now = datetime.now()
-                    hour, minute = map(int, create_time.split(':'))
-                    target_datetime = datetime(now.year, now.month, now.day, hour, minute)
-
-                    category, no = self.get_category_and_no(url)
-                    if self._post_already_exists((category, no), 'Realtime'):
-                        already_exists_post.append((category, no))
-                        continue
-
-                    gpt_obj_id = self.get_gpt_obj((category, no))
-                    contents = self.get_board_contents(url=url, category=category, no= no)
-                    self.db_controller.insert_one('Realtime', {
-                        'board_id': (category, no),
-                        'site': SITE_YGOSU,
-                        'title': title,
-                        'url': url,
-                        'create_time': target_datetime,
-                        'gpt_answer': gpt_obj_id,
-                        'contents': contents
-                    })
-                    logger.info(f"Inserted Success: {(category, no)} ")
+                gpt_obj_id = self.get_gpt_obj((category, no))
+                contents = self.get_board_contents(url=url, category=category, no=no)
+                self.db_controller.insert_one('Realtime', {
+                    'board_id': (category, no),
+                    'site': SITE_YGOSU,
+                    'title': title,
+                    'url': url,
+                    'create_time': target_datetime,
+                    'gpt_answer': gpt_obj_id,
+                    'contents': contents
+                })
+                logger.info(f"Inserted Success: {(category, no)} ")
             except Exception as e:
-                logger.error(f"Error processing real-time post: {e}")
+                logger.error(f"Error Save To DB {category, no}: {e}")
                 return False
 
         logger.info({"already exists post": already_exists_post})
+
         return True
 
     def get_board_contents(self, category=None, no=None, url=None):
@@ -175,14 +152,46 @@ class Ygosu(AbstractCommunityWebsite):
     
     def save_file(self, url):
         pass
-
+    
     def get_category_and_no(self, url) -> Tuple[str, int]:
         parts = url.split('/')
         no = parts[-2]
         category = parts[-3]
         
         return category, int(no)
+    
+    def get_board_list(self):
+        """ 게시판에서 URL, 날짜, 카테고리, 게시글 번호, 제목 추출 """
+        board_list = []
+        try:
+            req = requests.get('https://ygosu.com/board/real_article')
+            req.raise_for_status()
+            soup = BeautifulSoup(req.text, 'html.parser')
+        except Exception as e:
+            logger.error(f"Get List Error: {e}")
+            return
 
+        for tr in soup.find_all('tr'):
+            tit_element = tr.select_one('.tit a')
+            create_time_element = tr.select_one('.date')
+
+            if tit_element and create_time_element:
+                title = tit_element.get_text(strip=True)
+                create_time = create_time_element.get_text(strip=True)
+
+                if self.is_ad(create_time):
+                    continue
+
+                url = tit_element['href']
+                now = datetime.now()
+                hour, minute = map(int, create_time.split(':'))
+                target_datetime = datetime(now.year, now.month, now.day, hour, minute)
+
+                category, no = self.get_category_and_no(url)
+                board_list.append((url, target_datetime, category, no, title))
+
+        return board_list
+            
     def _post_already_exists(self, board_id, collection):
         existing_instance = self.db_controller.find(collection, {'board_id': board_id, 'site': SITE_YGOSU})
         return existing_instance
@@ -201,5 +210,7 @@ class Ygosu(AbstractCommunityWebsite):
             return gpt_obj.inserted_id
             
     def is_ad(self, title) -> bool:
-        pass
+        if not title or ':' not in title:  # 광고 및 공지 제외
+            return True
+        return False
     

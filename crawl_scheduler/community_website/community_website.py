@@ -39,6 +39,10 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
     def get_gpt_obj(self, url):
         logger.info(f"Saving image from URL: {url}")
         pass
+    
+    @abstractmethod
+    def get_board_list(self):
+        pass
 
     def save_file(self, url, category, no, alt_text=None):
         child_class_name = self.__class__.__name__

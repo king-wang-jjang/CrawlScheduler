@@ -17,66 +17,82 @@ class Ppomppu(AbstractCommunityWebsite):
         pass
 
     def get_realtime_best(self):
-        _url = f"https://www.ppomppu.co.kr/hot.php?id=&page=1&category=999"
         domain = "https://ppomppu.co.kr"
+        already_exists_post = []
+        board_list = self.get_board_list()  # 🔹 분리한 함수 호출
 
+        for url, category, no, target_datetime, title in board_list:  # ✅ 튜플 언패킹 활용
+            try:
+                # Check if the post already exists
+                if self._post_already_exists((category, no)):
+                    already_exists_post.append((category, no))
+                    continue
+
+                gpt_obj_id = self.get_gpt_obj((category, no))
+                contents = self.get_board_contents(url=domain+url, category=category, no=no)
+
+                self.db_controller.insert_one('Realtime', {
+                    'board_id': (category, no),
+                    'site': SITE_PPOMPPU,
+                    'title': title,
+                    'url': domain + url,
+                    'create_time': target_datetime,
+                    'gpt_answer': gpt_obj_id,
+                    'contents': contents
+                })
+                logger.info(f"Post {(category, no)} inserted successfully")
+            except Exception as e:
+                logger.error(f"Error Save To DB {category, no}: {e}")
+
+        logger.info({"already exists post": already_exists_post})
+        return True
+
+    def get_board_list(self, soup, now):
+        """ 게시판에서 URL, 카테고리, 게시글 번호, 생성 시간, 제목 추출 """
+        _url = "https://www.ppomppu.co.kr/hot.php?id=&page=1&category=999"
+        now = datetime.now()
         try:
             response = requests.get(_url)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
         except Exception as e:
-            logger.error(f"fetching page: {_url}, error: {e}")
-            return {}
+            logger.error(f"Get List Error: {e}")
 
-        now = datetime.now()
-        already_exists_post = []
+        board_list = []
 
-        result = []
         for tr in soup.find_all('tr', class_='bbs_new1'):
             try:
                 title_element = tr.find('a', class_='baseList-title')
                 create_time_element = tr.find('td', class_='board_date')
+
+                if not title_element or not create_time_element:
+                    continue
+
+                title = title_element.get_text(strip=True)
                 create_time = create_time_element.get_text(strip=True)
 
-                if title_element:
-                    title = title_element.get_text(strip=True)
-                    if (self.is_ad(title=title)):
-                        continue
+                # 광고인지 확인
+                if self.is_ad(title=title):
+                    continue
 
-                    url = title_element['href']
-                    category, no = self.get_category_and_no(url)
-                    no = int(no)
+                url = title_element['href']
+                category, no = self.get_category_and_no(url)
+                no = int(no)
 
-                    hour, minute, second = map(int, create_time.split(":"))
-                    target_datetime = datetime(now.year, now.month, now.day, hour, minute)
+                if "/" in create_time:
+                    logger.debug(f"Skipping older post: {create_time}")
+                    break
 
-                    if "/" in create_time:
-                        logger.debug(f"Skipping older post: {create_time}")
-                        break
+                hour, minute, second = map(int, create_time.split(":"))
+                target_datetime = datetime(now.year, now.month, now.day, hour, minute)
 
-                    # Check if the post already exists
-                    if self._post_already_exists((category, no)):
-                        already_exists_post.append((category, no))
-                        continue
+                # ✅ 튜플로 반환
+                board_list.append((url, category, no, target_datetime, title))
 
-                    gpt_obj_id = self.get_gpt_obj((category, no))
-                    contents = self.get_board_contents(url=domain+url, category=category, no= no)
-                    self.db_controller.insert_one('Realtime', {
-                        'board_id': (category, no),
-                        'site': SITE_PPOMPPU,
-                        'title': title,
-                        'url': domain + url,
-                        'create_time': target_datetime,
-                        'gpt_answer': gpt_obj_id,
-                        'contents': contents
-                    })
-                    logger.info(f"Post {(category, no)} inserted successfully")
             except Exception as e:
-                logger.error(f"Error processing post{(category, no)}{url}: {e}")
+                logger.error(f"Error parsing post: {e}")
 
-        logger.info({"already exists post": already_exists_post})
-
-        return True
+        return board_list
     
     def is_ad(self, title) -> bool:
         if not title.startswith("AD"):
