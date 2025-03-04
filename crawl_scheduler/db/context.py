@@ -10,7 +10,10 @@ class Database:
     db_password = Config().get_env("DB_PASSWORD")
     escaped_user = quote_plus(db_user)
     escaped_password = quote_plus(db_password)
-    client = MongoClient(f'mongodb://{escaped_user}:{escaped_password}@{db_host}/{db_name}?authMechanism=SCRAM-SHA-256')
+    client = MongoClient(
+        f'mongodb://{escaped_user}:{escaped_password}@{db_host}/{db_name}?authSource=admin&authMechanism=SCRAM-SHA-256'
+    )
+    # client = MongoClient(f'mongodb://{escaped_user}:{escaped_password}@{db_host}/{db_name}?authMechanism=SCRAM-SHA-256')
     # client = MongoClient(
     #     f'mongodb://{escaped_user}:{escaped_password}@{db_host}:27017/{db_name}?authSource=kingwangjjang&authMechanism=SCRAM-SHA-256'
     # )

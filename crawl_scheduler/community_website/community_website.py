@@ -36,6 +36,10 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
         pass
 
     @abstractmethod
+    def get_gpt_obj(self, url):
+        logger.info(f"Saving image from URL: {url}")
+        pass
+
     def save_file(self, url, category, no, alt_text=None):
         child_class_name = self.__class__.__name__
         root_path = Config().get_env('ROOT')
@@ -64,11 +68,6 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
         relative_path = os.path.relpath(file_path, root_path)
         
         return relative_path
-
-    @abstractmethod
-    def get_gpt_obj(self, url):
-        logger.info(f"Saving image from URL: {url}")
-        pass
 
     def img_to_text(self, img_path):
         # pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
