@@ -21,60 +21,36 @@ class Theqoo(AbstractCommunityWebsite):
     def get_daily_best(self):
         pass
     
-    def get_real_time_best(self):
+    def get_realtime_best(self):
         category = 'hot'  # theqoo는 카테고리를 hot으로 단일 고정 (20250214)
-        try:
-            req = requests.get('https://theqoo.net/hot', headers=self.g_headers[0])
-            req.raise_for_status()
-            html_content = req.text
-            soup = BeautifulSoup(html_content, 'html.parser')
-            li_elements = soup.select('.hide_notice tr')
-        except Exception as e:
-            logger.error(f"Error fetching Theqoo hot page: {e}")
-            return
-   
         already_exists_post = []
-        result = []
+        board_list = self.get_board_list()  # 🔹 분리한 함수 호출
 
-        for li in li_elements:
-            elements = li.find_all('td')
-            if len(elements) > 1:
-                try:
-                    title = elements[2].get_text(strip=True)
-                    url = "https://theqoo.net" + elements[2].find('a')['href']
-                    no = url.split('hot/')[-1]
-                    time_text = elements[3].get_text(strip=True)
+        for url, no, target_datetime, title in board_list:  # ✅ 튜플 언패킹 활용
+            try:
+                # Check if post already exists in DB
+                if self._post_already_exists(no, already_exists_post):
+                    already_exists_post.append((category, no))
+                    continue
 
-                    if '-' in time_text:
-                        break  # Skip older posts
+                gpt_obj_id = self.get_gpt_obj(no)
+                contents = self.get_board_contents(url=url, category=category, no=no)
+                self.db_controller.insert_one('Realtime', {
+                    'board_id': (category, no),
+                    'site': SITE_THEQOO,
+                    'title': title,
+                    'url': url,
+                    'create_time': target_datetime,
+                    'GPTAnswer': gpt_obj_id,
+                    'contents': contents
+                })
+                logger.info(f"Post {(category, no)} inserted successfully")
+            except Exception as e:
+                logger.error(f"Error Save To DB {category, no}: {e}")
 
-                    now = datetime.now()
-                    hour, minute = map(int, time_text.split(':'))
-                    target_datetime = datetime(now.year, now.month, now.day, hour, minute)
-
-                    # Check if post already exists in DB
-                    if self._post_already_exists(no, already_exists_post):
-                        continue
-
-                    gpt_obj_id = self.get_gpt_obj(no)
-                    
-                    contents = self.get_board_contents(url=url, category=category, no=no)
-                    self.db_controller.insert_one('Realtime', {
-                        'board_id': (category, no),
-                        'site': SITE_THEQOO,
-                        'title': title,
-                        'url': url,
-                        'create_time': target_datetime,
-                        'GPTAnswer': gpt_obj_id,
-                        'contents': contents
-                    })
-                    logger.info(f"Post {no} inserted successfully")
-                except Exception as e:
-                    logger.error(f"Error processing post {no}: {e}")
-        
         logger.info({"already exists post": already_exists_post})
         return True
-
+    
     def get_board_contents(self, category= None, no=None, url=None):
         _url = "https://theqoo.net/hot/" + no
         content_list = []
@@ -110,6 +86,43 @@ class Theqoo(AbstractCommunityWebsite):
         except Exception as e:
             logger.error(f"Error fetching board contents for {no}: {e}")
             return []
+    
+    def get_board_list(self):
+        """ 게시판에서 URL, 게시글 번호, 생성 시간, 제목 추출 """
+        try:
+            req = requests.get('https://theqoo.net/hot', headers=self.g_headers[0])
+            req.raise_for_status()
+            html_content = req.text
+            soup = BeautifulSoup(html_content, 'html.parser')
+        except Exception as e:
+            logger.error(f"Get List Error: {e}")
+
+        board_list = []
+        li_elements = soup.select('.hide_notice tr')
+
+        for li in li_elements:
+            elements = li.find_all('td')
+            if len(elements) > 1:
+                try:
+                    title = elements[2].get_text(strip=True)
+                    url = "https://theqoo.net" + elements[2].find('a')['href']
+                    no = url.split('hot/')[-1]
+                    time_text = elements[3].get_text(strip=True)
+
+                    if '-' in time_text:
+                        break  # Skip older posts
+
+                    now = datetime.now()
+                    hour, minute = map(int, time_text.split(':'))
+                    target_datetime = datetime(now.year, now.month, now.day, hour, minute)
+
+                    # ✅ 튜플로 반환
+                    board_list.append((url, no, target_datetime, title))
+
+                except Exception as e:
+                    logger.error(f"Error parsing post: {e}")
+
+        return board_list
 
     def save_file(self, url):
         if not os.path.exists(self.download_path):

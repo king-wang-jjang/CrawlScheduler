@@ -45,7 +45,7 @@ class NatePan(AbstractCommunityWebsite):
             logger.error(f"Error initializing NatePan: {e}")
     def get_daily_best(self):
         pass
-    def get_real_time_best(self):
+    def get_realtime_best(self):
         logger.info("Fetching real-time best posts from NatePan")
         try:
             req = requests.get('https://pann.nate.com/', headers=self.g_headers[0])

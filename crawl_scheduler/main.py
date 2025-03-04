@@ -10,7 +10,7 @@ from crawl_scheduler.utils.loghandler import logger
 
 # board_semaphores = {}
 
-def get_real_time_best():
+def get_realtime_best():
     crawl_List = [Ygosu(), Ppomppu(), Theqoo(), Dcinside()]
     success_status = {}
 
@@ -21,7 +21,7 @@ def get_real_time_best():
         try:
             current_site = crawl.__class__.__name__
             logger.info(f"Start - real-time {current_site}")
-            if (crawl.get_real_time_best()):
+            if (crawl.get_realtime_best()):
                 logger.info(f"Success: {current_site}")
                 success_status[current_site] = "Success"
             else:
@@ -36,7 +36,7 @@ import schedule
 import time
 
 def job():
-    get_real_time_best()
+    get_realtime_best()
 
 if __name__ == "__main__":
     schedule.every(5).minutes.do(job)  # 5분마다 실행

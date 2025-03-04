@@ -21,80 +21,104 @@ class Dcinside(AbstractCommunityWebsite):
     def get_daily_best(self):
         pass
 
-    def get_real_time_best(self):
+    def get_realtime_best(self):
+        already_exists_post = []
+        board_list = self.get_board_list()  # 🔹 분리한 함수 호출
+
+        for url, category, no, title, time_obj in board_list:  # ✅ 튜플 언패킹 활용
+            try:
+                if self._post_already_exists((category, no)):
+                    already_exists_post.append((category, no))
+                    continue
+
+                gpt_obj_id = self.get_gpt_obj((category, no))
+                contents = self.get_board_contents(url=url, category=category, no=no)
+
+                self.db_controller.insert_one('Realtime', {
+                    'board_id': (category, no),
+                    'site': SITE_DCINSIDE,
+                    'title': title,
+                    'url': url,
+                    'create_time': time_obj,
+                    'gpt_answer': gpt_obj_id,
+                    'contents': contents
+                })
+                logger.info(f"Post {(category, no)} inserted successfully")
+            except Exception as e:
+                logger.error(f"Error Save To DB {category, no}: {e}")
+
+        logger.info("Already exists post: %s", already_exists_post)
+        return True
+
+    def get_board_list(self):
+        """ 게시판에서 URL, 카테고리, 게시글 번호, 생성 시간, 제목 추출 """
         try:
             req = requests.get('https://gall.dcinside.com/board/lists/?id=dcbest', headers=self.g_headers[0])
             req.raise_for_status()  # Check for HTTP errors
             html_content = req.text
             soup = BeautifulSoup(html_content, 'html.parser')
-            tr_elements = soup.select('tr.ub-content') # 첫번 째는 쓰레기 값
-            already_exists_post = []
-
         except Exception as e:
-            logger.error("fetching real-time best posts: %s", e)
+            logger.error(f"Get List Error: {e}")
+
+        board_list = []
+        tr_elements = soup.select('tr.ub-content')
 
         for tr in tr_elements:
             try:
-                # URL 추출 (url)
+                # URL 추출
                 a_tag = tr.find('a', href=True)
-                if a_tag:
-                    gall_num_td = tr.find('td', class_='gall_num')
-                    if (self.is_ad(gall_num_td)):
-                        continue
+                if not a_tag:
+                    continue
 
-                    url = "https://gall.dcinside.com" + a_tag['href']
-                    url_parts = url.split('?id=')[1].split('&no=')
-                    category = url_parts[0]
-                    no = url_parts[1].split('&')[0]
-                    title = a_tag.get_text(strip=True)
-                    time_tag = tr.find('td', class_='gall_date')
-                    if time_tag:
-                        time_str = time_tag.get_text(strip=True)
-                        # 만약 이미 날짜가 포함되어 있다면(예: '2025-02-17 02.16')
-                        if '-' in time_str:
-                            # 시간 부분에 콜론 대신 점이 사용되었다면 변환
-                            parts = time_str.split()
-                            if len(parts) == 2:
-                                date_part, time_part = parts
-                                if '.' in time_part and ':' not in time_part:
-                                    time_part = time_part.replace('.', ':')
-                                datetime_str = f"{date_part} {time_part}"
-                            else:
-                                datetime_str = time_str
-                        else:
-                            # 시간만 있다면 오늘 날짜와 결합 (예: '16:55' 또는 '02.16')
-                            if '.' in time_str and ':' not in time_str:
-                                time_str = time_str.replace('.', ':')
-                            today_date = datetime.today().strftime('%Y-%m-%d')
-                            datetime_str = f"{today_date} {time_str}"
-                        try:
-                            time_obj = datetime.strptime(datetime_str, '%Y-%m-%d %H:%M')
-                        except ValueError:
-                            time_obj = None
-                    else:
-                        time_obj = None  # 시간을 찾지 못한 경우 None
+                gall_num_td = tr.find('td', class_='gall_num')
+                if self.is_ad(gall_num_td):
+                    continue
 
-                    if self._post_already_exists((category, no)):
-                        already_exists_post.append((category, no))
-                        continue
+                url = "https://gall.dcinside.com" + a_tag['href']
+                url_parts = url.split('?id=')[1].split('&no=')
+                category = url_parts[0]
+                no = url_parts[1].split('&')[0]
+                title = a_tag.get_text(strip=True)
 
-                    gpt_obj_id = self.get_gpt_obj((category, no))
-                    contents = self.get_board_contents(url=url, category=category, no= no)
-                    self.db_controller.insert_one('Realtime', {
-                        'board_id': (category, no),
-                        'site': SITE_DCINSIDE,
-                        'title': title,
-                        'url': url,
-                        'create_time': time_obj,
-                        'gpt_answer': gpt_obj_id,
-                        'contents': contents
-                    })
-                    logger.info(f"Post {(category, no)} inserted successfully")
+                # 시간 처리
+                time_obj = self.parse_time(tr.find('td', class_='gall_date'))
+
+                # ✅ 튜플로 반환
+                board_list.append((url, category, no, title, time_obj))
+
             except Exception as e:
-                logger.error(f"Error processing post{(no, category)}{url}: {e}")
+                logger.error(f"Error parsing post: {e}")
 
-        logger.info("Already exists post: %s", already_exists_post)
+        return board_list
 
+    def parse_time(self, time_tag):
+        """ 시간 문자열을 datetime 객체로 변환 """
+        if not time_tag:
+            return None
+        
+        time_str = time_tag.get_text(strip=True)
+
+        # 만약 이미 날짜가 포함되어 있다면(예: '2025-02-17 02.16')
+        if '-' in time_str:
+            parts = time_str.split()
+            if len(parts) == 2:
+                date_part, time_part = parts
+                if '.' in time_part and ':' not in time_part:
+                    time_part = time_part.replace('.', ':')
+                datetime_str = f"{date_part} {time_part}"
+            else:
+                datetime_str = time_str
+        else:
+            # 시간만 있다면 오늘 날짜와 결합 (예: '16:55' 또는 '02.16')
+            if '.' in time_str and ':' not in time_str:
+                time_str = time_str.replace('.', ':')
+            today_date = datetime.today().strftime('%Y-%m-%d')
+            datetime_str = f"{today_date} {time_str}"
+
+        try:
+            return datetime.strptime(datetime_str, '%Y-%m-%d %H:%M')
+        except ValueError:
+            return None  # 파싱 실패 시 None 반환
 
     def get_board_contents(self, category= None, no=None, url=None):
         # try:

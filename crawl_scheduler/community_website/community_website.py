@@ -19,23 +19,31 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
     @abstractmethod
     def get_daily_best(self):
         logger.info("Getting daily best content.")
-        return {}
+        pass 
 
     @abstractmethod
-    def get_real_time_best(self):
+    def get_realtime_best(self):
         logger.info("Getting real-time best content.")
-        return {}
+        pass
 
     @abstractmethod
     def get_board_contents(self, board_id):
         logger.info(f"Fetching board contents for board_id: {board_id}")
-        return {}
+        pass
 
     @abstractmethod
     def is_ad(self, title) -> bool:
         pass
 
     @abstractmethod
+    def get_gpt_obj(self, url):
+        logger.info(f"Saving image from URL: {url}")
+        pass
+    
+    @abstractmethod
+    def get_board_list(self):
+        pass
+
     def save_file(self, url, category, no, alt_text=None):
         child_class_name = self.__class__.__name__
         root_path = Config().get_env('ROOT')
@@ -65,15 +73,8 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
         
         return relative_path
 
-    @abstractmethod
-    def get_gpt_obj(self, url):
-        logger.info(f"Saving image from URL: {url}")
-        return {}
-
     def img_to_text(self, img_path):
-        
         # pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-
         logger.info(f"Converting image to text from path: {img_path}")
         custom_config = r'--oem 3 --psm 6 -l kor'
         allowed_extensions = ['jpg', 'png', 'jpeg']

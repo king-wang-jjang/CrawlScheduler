@@ -36,7 +36,7 @@ class Instiz(AbstractCommunityWebsite):
         # To be implemented if needed
         pass
 
-    def get_real_time_best(self):
+    def get_realtime_best(self):
         logger.info("Fetching real-time best posts from Instiz")
         _url = "https://www.instiz.net/"
         try:

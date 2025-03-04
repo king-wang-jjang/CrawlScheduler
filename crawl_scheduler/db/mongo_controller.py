@@ -30,7 +30,7 @@ class MongoController(object):
         collection = self.db.get_collection(collection_name)
         return collection.delete_one(query)
 
-    def get_real_time_best(self, index, limit):
+    def get_realtime_best(self, index, limit):
         collection = self.db.get_collection('Realtime')
         return list(collection.find().sort("create_time", pymongo.DESCENDING).skip(index * limit).limit(limit))
 

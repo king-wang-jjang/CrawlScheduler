@@ -87,7 +87,7 @@ class Ruliweb(AbstractCommunityWebsite):
         data = {"rank": {i + 1: item for i, item in enumerate(result)}}
         return data
 
-    def get_real_time_best(self):
+    def get_realtime_best(self):
         '''
         Ruliweb daily best posts
 
