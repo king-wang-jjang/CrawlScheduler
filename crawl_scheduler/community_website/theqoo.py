@@ -161,7 +161,8 @@ class Theqoo(AbstractCommunityWebsite):
             gpt_obj = self.db_controller.insert_one('GPT', {
                 'board_id': board_id,
                 'site': SITE_THEQOO,
-                'answer': DEFAULT_GPT_ANSWER
+                'answer': DEFAULT_GPT_ANSWER,
+                'tag': DEFAULT_TAG
             })
             return gpt_obj.inserted_id
 
@@ -173,6 +174,7 @@ class Theqoo(AbstractCommunityWebsite):
             tag_obj = self.db_controller.insert_one('TAG', {
                 'board_id': board_id,
                 'site': SITE_THEQOO,
+                'answer': DEFAULT_GPT_ANSWER,
                 'Tag': DEFAULT_TAG
             })
             return tag_obj.inserted_id

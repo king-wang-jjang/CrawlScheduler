@@ -47,7 +47,7 @@ class Ppomppu(AbstractCommunityWebsite):
         logger.info({"already exists post": already_exists_post})
         return True
 
-    def get_board_list(self, soup, now):
+    def get_board_list(self):
         """ 게시판에서 URL, 카테고리, 게시글 번호, 생성 시간, 제목 추출 """
         _url = "https://www.ppomppu.co.kr/hot.php?id=&page=1&category=999"
         now = datetime.now()
