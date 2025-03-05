@@ -35,8 +35,8 @@ class Ppomppu(AbstractCommunityWebsite):
                     already_exists_post.append((category, no))
                     continue
                 
-                if category == "freeboard":
-                    logger.warn("Freeboard ========================================")
+                # if category == "freeboard":
+                #     logger.warn("Freeboard ========================================")
                     
                 gpt_obj_id = self.get_gpt_obj((category, no))
                 contents = self.get_board_contents(url=domain+url, category=category, no=no)
@@ -127,10 +127,10 @@ class Ppomppu(AbstractCommunityWebsite):
                 response.raise_for_status()
                 soup = BeautifulSoup(response.text, 'lxml')
                 board_body = soup.find('td', class_='board-contents')
-                if category == "freeboard":
-                    logger.info(soup)
-                    logger.info("=========================")
-                    logger.info(board_body)
+                # if category == "freeboard":
+                #     logger.info(soup)
+                #     logger.info("=========================")
+                #     logger.info(board_body)
                 paragraphs = board_body.find_all('p')
                     
                 for p in paragraphs:
