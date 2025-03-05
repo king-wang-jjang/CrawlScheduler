@@ -12,19 +12,29 @@ from crawl_scheduler.utils.loghandler import logger
 class Ppomppu(AbstractCommunityWebsite):
     def __init__(self):
         self.db_controller = MongoController()
+        self.debugging_mode = False
 
     def get_daily_best(self):
         pass
 
-    def get_realtime_best(self):
+    def get_realtime_best(self, category=None, no=None):
         domain = "https://ppomppu.co.kr"
         already_exists_post = []
-        board_list = self.get_board_list()  # 🔹 분리한 함수 호출
+        board_list = self.get_board_list()
+        
+        if category and no:
+            self.debugging_mode = True
+            url = f"/zboard/view.php?id={category}&no={no}"
+            target_datetime = datetime.now()
+            title = "Debbugging Mode"
+            board_list = [(url, category, no, target_datetime, title)]
 
-        for url, category, no, target_datetime, title in board_list:  # ✅ 튜플 언패킹 활용
+        for url, category, no, target_datetime, title in board_list: 
             try:
-                # Check if the post already exists
-                if self._post_already_exists((category, no)):
+                if category == "freeboard":
+                    logger.warn("Freeboard ========================================")
+                    
+                if self._post_already_exists((category, no)) and self.debugging_mode == False:
                     already_exists_post.append((category, no))
                     continue
 
