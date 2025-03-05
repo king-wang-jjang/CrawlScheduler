@@ -127,8 +127,12 @@ class Ppomppu(AbstractCommunityWebsite):
                 response.raise_for_status()
                 soup = BeautifulSoup(response.text, 'lxml')
                 board_body = soup.find('td', class_='board-contents')
+                if category == "freeboard":
+                    logger.info(soup)
+                    logger.info("=========================")
+                    logger.info(board_body)
                 paragraphs = board_body.find_all('p')
-
+                    
                 for p in paragraphs:
                     if p.find('img'):
                         img_url = "https:" + p.find('img')['src']
