@@ -1,5 +1,7 @@
+from io import BytesIO
 import os
-from abc import ABC, abstractmethod  # abc 모듈 추가
+from abc import ABC, abstractmethod
+from PIL import Image
 # img to text
 import pytesseract
 import requests
@@ -45,13 +47,22 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
         pass
 
     def save_file(self, url, category, no, alt_text=None):
+        headers = {"User-Agent": "Mozilla/5.0", "Cache-Control": "no-cache"}
+        response = requests.get(url, headers=headers, stream=True)
         child_class_name = self.__class__.__name__
         root_path = Config().get_env('ROOT')
         path = os.path.join(root_path, child_class_name, str(category), str(no))
         
         logger.info(f"Saving image from URL: {url}")
         os.makedirs(path, exist_ok=True)
-        
+
+        if response.status_code == 200:
+            print(response.headers.get("content-Disposition"))
+            img = Image.open(BytesIO(response.content))
+            img_format = img.format
+        else:
+            logger.error(f"이미지를 가져오는 데 실패했습니다.: {response.status_code}") 
+                
         if alt_text:
             file_name = alt_text
         else:
@@ -62,6 +73,8 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
         
         index = 1
         while os.path.exists(file_path):
+            if img_format:
+                file_extension = f".{img_format}"
             file_path = os.path.join(path, f"{file_name_without_extension}_{index}{file_extension}")
             index += 1
         
