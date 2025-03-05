@@ -31,13 +31,13 @@ class Ppomppu(AbstractCommunityWebsite):
 
         for url, category, no, target_datetime, title in board_list: 
             try:
-                if category == "freeboard":
-                    logger.warn("Freeboard ========================================")
-                    
                 if self._post_already_exists((category, no)) and self.debugging_mode == False:
                     already_exists_post.append((category, no))
                     continue
-
+                
+                if category == "freeboard":
+                    logger.warn("Freeboard ========================================")
+                    
                 gpt_obj_id = self.get_gpt_obj((category, no))
                 contents = self.get_board_contents(url=domain+url, category=category, no=no)
 
