@@ -85,7 +85,7 @@ class Ppomppu(AbstractCommunityWebsite):
                 if self.is_ad(title=title):
                     continue
 
-                url = title_element['href']
+                url = f"/zboard/view.php?id={category}&no={no}"
                 category, no = self.get_category_and_no(url)
                 no = int(no)
 
