@@ -5,6 +5,8 @@ name: Crawl_scheduler CI
 on:
   push:
     branches: ["main"]
+  pull_request: 
+    branches: ["main"]
 
 # fastapi.yml (Django CI)workflow 에서 실행할 Job(작업) 정의
 jobs:
