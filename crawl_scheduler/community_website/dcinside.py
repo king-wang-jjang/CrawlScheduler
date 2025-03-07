@@ -2,6 +2,7 @@ import re
 from bs4 import BeautifulSoup
 import requests
 from datetime import datetime
+from crawl_scheduler.config import Config
 from crawl_scheduler.db.mongo_controller import MongoController
 from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_DCINSIDE, DEFAULT_TAG
@@ -12,7 +13,9 @@ from crawl_scheduler.utils.loghandler import logger
 class Dcinside(AbstractCommunityWebsite):
     g_headers = [
         {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'},
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'referer': 'https://www.dcinside.com/'
+        },
     ]
 
     def __init__(self):
@@ -121,20 +124,37 @@ class Dcinside(AbstractCommunityWebsite):
             return None  # 파싱 실패 시 None 반환
 
     def get_board_contents(self, category= None, no=None, url=None):
-        # try:
-        #     respone = requests.get(url, headers=self.g_headers[0])
-        #     respone.raise_for_status()
-        #     soup = BeautifulSoup(respone.text, 'html.parser')
-        #     board_body = soup.find('div', class_='write_div')
-        #     paragraphs = board_body.find_all('p')
+        content_list = []
+        try:
+            respone = requests.get(url, headers=self.g_headers[0])
+            respone.raise_for_status()
+            soup = BeautifulSoup(respone.text, 'html.parser')
+            board_body = soup.find('div', class_='write_div')
+            paragraphs = board_body.find_all('p')
 
-            # content_list = self._parse_content(soup)
-            # return content_list
+            for p in paragraphs:
+                if p.find('img'):
+                    img_url = p.find('img')['src']
+                    try:
+                        file_path = super().save_file(img_url, category=category, no=no, headers=self.g_headers[0])
+                        img_txt = super().img_to_text(os.path.join(Config().get_env('ROOT'), file_path))
+                        content_list.append({'type': 'image', 'path': file_path, 'content': img_txt})
+                    except Exception as e:
+                        logger.error(f"Error processing image: {url} {e}")
+                elif p.find('video'):
+                    video_url = "https:" + p.find('video').find('source')['src']
+                    try:
+                        file_path = super().save_file(video_url, category=category, no=no)
+                        content_list.append({'type': 'video', 'path': file_path})
+                    except Exception as e:
+                        logger.error(f"Error saving video: {e}")
+                else:
+                    content_list.append({'type': 'text', 'content': p.text.strip()})
+        except Exception as e:
+            logger.error(f"Error fetching board contents for {no if no else url}: {e}")
+
+        return content_list
         
-        # except Exception as e:
-            # logger.error(f"Error fetching board contents for {no if no else url}: {e}")
-        return {"text": "dcinside는 지원하지 않습니다."}
-
     def set_driver_options(self):
         logger.info("Setting up Chrome driver options for Selenium")
         chrome_options = Options()
@@ -206,18 +226,6 @@ class Dcinside(AbstractCommunityWebsite):
                 'answer': DEFAULT_GPT_ANSWER
             })
             return gpt_obj.inserted_id
-
-    def _parse_content(self, soup):
-        logger.debug("Parsing content from the page")
-        content_list = []
-        write_div = soup.find('div', class_='write_div')
-        find_all = write_div.find_all(['p']) if len(write_div.find_all(['p'])) > len(
-            write_div.find_all(['div'])) else write_div.find_all(['div'])
-
-        for element in find_all:
-            text_content = element.text.strip()
-            content_list.append({'type': 'text', 'content': text_content})
-        return content_list
 
     def _get_newest_file(self, directory):
         logger.debug(f"Finding newest file in {directory}")
