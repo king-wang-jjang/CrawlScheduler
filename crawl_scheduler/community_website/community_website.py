@@ -1,6 +1,7 @@
 from io import BytesIO
 import os
 from abc import ABC, abstractmethod
+import re
 from PIL import Image
 # img to text
 import pytesseract
@@ -46,8 +47,10 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
     def get_board_list(self):
         pass
 
-    def save_file(self, url, category, no, alt_text=None):
-        headers = {"User-Agent": "Mozilla/5.0", "Cache-Control": "no-cache"}
+    def save_file(self, url, category, no, alt_text=None, headers=None):
+        if not headers:
+            headers = {"User-Agent": "Mozilla/5.0", "Cache-Control": "no-cache"}
+
         response = requests.get(url, headers=headers, stream=True)
         child_class_name = self.__class__.__name__
         root_path = Config().get_env('ROOT')
@@ -56,21 +59,24 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
         logger.info(f"Saving image from URL: {url}")
         os.makedirs(path, exist_ok=True)
 
+        if alt_text:
+            file_name = alt_text
+        else:
+            file_name = os.path.basename(url)
+
         if response.status_code == 200:
-            print(response.headers.get("content-Disposition"))
+            match = re.search(r'filename="?([^";]+)"?', response.headers.get("content-Disposition"))
+            if match:
+                file_name = match.group(1)
             img = Image.open(BytesIO(response.content))
             img_format = img.format
         else:
             logger.error(f"이미지를 가져오는 데 실패했습니다.: {response.status_code}") 
                 
-        if alt_text:
-            file_name = alt_text
-        else:
-            file_name = os.path.basename(url)
-        
         file_name_without_extension, file_extension = os.path.splitext(file_name)
         file_path = os.path.join(path, file_name)
         
+        # 중복검사
         index = 1
         while os.path.exists(file_path):
             if img_format:
@@ -79,7 +85,7 @@ class AbstractCommunityWebsite(ABC):  # ABC 클래스 상속 추가
             index += 1
         
         with open(file_path, 'wb') as f:
-            f.write(requests.get(url).content)
+            f.write(response.content)
         
         # ROOT 경로를 제거하여 상대 경로 반환
         relative_path = os.path.relpath(file_path, root_path)
