@@ -80,6 +80,7 @@ class Ppomppu(AbstractCommunityWebsite):
 
                 title = title_element.get_text(strip=True)
                 create_time = create_time_element.get_text(strip=True)
+                url = title_element['href']
 
                 # 광고인지 확인
                 if self.is_ad(title=title):
