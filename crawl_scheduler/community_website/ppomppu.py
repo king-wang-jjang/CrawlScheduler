@@ -62,7 +62,7 @@ class Ppomppu(AbstractCommunityWebsite):
         url = "https://www.ppomppu.co.kr/hot.php?id=&page=1&category=999"
         now = datetime.now()
         try:
-            response = requests.get(_url)
+            response = requests.get(url)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
         except Exception as e:
