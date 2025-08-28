@@ -30,7 +30,7 @@ class Dcinside(AbstractCommunityWebsite):
 
         for url, category, no, title, time_obj in board_list:  # ✅ 튜플 언패킹 활용
             try:
-                if self._post_already_exists((category, no)):
+                if self._post_already_exists(category, no):
                     already_exists_post.append((category, no))
                     continue
 
@@ -38,8 +38,9 @@ class Dcinside(AbstractCommunityWebsite):
                 contents = self.get_board_contents(url=url, category=category, no=no)
 
                 self.db_controller.insert_one('Realtime', {
-                    'board_id': (category, no),
                     'site': SITE_DCINSIDE,
+                    'category': category,
+                    'no': int(no),
                     'title': title,
                     'url': url,
                     'create_time': time_obj,
@@ -157,6 +158,17 @@ class Dcinside(AbstractCommunityWebsite):
         
     def set_driver_options(self):
         logger.info("Setting up Chrome driver options for Selenium")
+        import importlib
+        webdriver_mod = importlib.import_module('selenium')
+        options_mod = importlib.import_module('selenium.webdriver.chrome.options')
+        common_by = importlib.import_module('selenium.webdriver.common.by')
+        support_ui = importlib.import_module('selenium.webdriver.support.ui')
+        support_ec = importlib.import_module('selenium.webdriver.support.expected_conditions')
+        Options = getattr(options_mod, 'Options')
+        webdriver = getattr(webdriver_mod, 'webdriver')
+        By = getattr(common_by, 'By')
+        WebDriverWait = getattr(support_ui, 'WebDriverWait')
+        EC = support_ec
         chrome_options = Options()
         prefs = {"download.default_directory": self.download_path}
         chrome_options.add_experimental_option("prefs", prefs)
@@ -184,6 +196,7 @@ class Dcinside(AbstractCommunityWebsite):
         os.makedirs(self.download_path, exist_ok=True)
 
         initial_file_count = len(os.listdir(self.download_path))
+        import time
         script = f'''
             var link = document.createElement('a');
             link.href = "{url}";
@@ -193,9 +206,12 @@ class Dcinside(AbstractCommunityWebsite):
         self.driver.execute_script(script)
 
         try:
-            WebDriverWait(self.driver, 5).until(
-                lambda x: len(os.listdir(self.download_path)) > initial_file_count
-            )
+            start_time = time.time()
+            timeout_sec = 5
+            while time.time() - start_time < timeout_sec:
+                if len(os.listdir(self.download_path)) > initial_file_count:
+                    break
+                time.sleep(0.1)
             newest_file = self._get_newest_file(self.download_path)
             logger.info(f"Image saved successfully at {newest_file}")
             return os.path.join(self.download_path, newest_file)
@@ -254,6 +270,6 @@ class Dcinside(AbstractCommunityWebsite):
     def save_file(self, url, category, no, alt_text=None):
         pass
 
-    def _post_already_exists(self, board_id):
-        existing_instance = self.db_controller.find('Realtime', {'board_id': board_id, 'site': SITE_DCINSIDE})
+    def _post_already_exists(self, category, no):
+        existing_instance = self.db_controller.find('Realtime', {'site': SITE_DCINSIDE, 'category': category, 'no': int(no)})
         return existing_instance

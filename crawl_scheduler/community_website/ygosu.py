@@ -74,15 +74,16 @@ class Ygosu(AbstractCommunityWebsite):
         board_list = self.get_board_list()  # 🔹 분리한 함수 호출
         for url, target_datetime, category, no, title in board_list:
             try:
-                if self._post_already_exists((category, no), 'Realtime'):
+                if self._post_already_exists(category, no, 'Realtime'):
                     already_exists_post.append((category, no))
                     continue
 
                 gpt_obj_id = self.get_gpt_obj((category, no))
                 contents = self.get_board_contents(url=url, category=category, no=no)
                 self.db_controller.insert_one('Realtime', {
-                    'board_id': (category, no),
                     'site': SITE_YGOSU,
+                    'category': category,
+                    'no': int(no),
                     'title': title,
                     'url': url,
                     'create_time': target_datetime,
@@ -192,8 +193,14 @@ class Ygosu(AbstractCommunityWebsite):
 
         return board_list
             
-    def _post_already_exists(self, board_id, collection):
-        existing_instance = self.db_controller.find(collection, {'board_id': board_id, 'site': SITE_YGOSU})
+    def _post_already_exists(self, arg1, arg2, arg3=None):
+        # 호환성 유지: (board_id, 'Daily') 또는 (category, no, 'Realtime') 모두 지원
+        if arg3 is None:
+            board_id, collection = arg1, arg2
+            existing_instance = self.db_controller.find(collection, {'board_id': board_id, 'site': SITE_YGOSU})
+        else:
+            category, no, collection = arg1, arg2, arg3
+            existing_instance = self.db_controller.find(collection, {'site': SITE_YGOSU, 'category': category, 'no': int(no)})
         return existing_instance
 
     def get_gpt_obj(self, board_id):

@@ -29,15 +29,16 @@ class Theqoo(AbstractCommunityWebsite):
         for url, no, target_datetime, title in board_list:  # ✅ 튜플 언패킹 활용
             try:
                 # Check if post already exists in DB
-                if self._post_already_exists(no, already_exists_post):
+                if self._post_already_exists(('hot', no), already_exists_post):
                     already_exists_post.append((category, no))
                     continue
 
                 gpt_obj_id = self.get_gpt_obj(no)
                 contents = self.get_board_contents(url=url, category=category, no=no)
                 self.db_controller.insert_one('Realtime', {
-                    'board_id': (category, no),
                     'site': SITE_THEQOO,
+                    'category': category,
+                    'no': int(no),
                     'title': title,
                     'url': url,
                     'create_time': target_datetime,
@@ -147,7 +148,13 @@ class Theqoo(AbstractCommunityWebsite):
             return None
 
     def _post_already_exists(self, board_id, already_exists_post):
-        existing_instance = self.db_controller.find('Realtime', {'board_id': board_id, 'site': SITE_THEQOO})
+        # board_id는 (category, no) 튜플 형태를 기대
+        if isinstance(board_id, tuple) and len(board_id) == 2:
+            category, no = board_id
+            existing_instance = self.db_controller.find('Realtime', {'site': SITE_THEQOO, 'category': category, 'no': int(no)})
+        else:
+            # 하위호환: no만 들어온 경우 category=hot 고정
+            existing_instance = self.db_controller.find('Realtime', {'site': SITE_THEQOO, 'category': 'hot', 'no': int(board_id)})
         if existing_instance:
             already_exists_post.append(board_id)
             return True

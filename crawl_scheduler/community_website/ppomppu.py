@@ -31,7 +31,7 @@ class Ppomppu(AbstractCommunityWebsite):
 
         for url, category, no, target_datetime, title in board_list: 
             try:
-                if self._post_already_exists((category, no)) and self.debugging_mode == False:
+                if self._post_already_exists(category, no) and self.debugging_mode == False:
                     already_exists_post.append((category, no))
                     continue
                 
@@ -42,8 +42,9 @@ class Ppomppu(AbstractCommunityWebsite):
                 contents = self.get_board_contents(url=domain+url, category=category, no=no)
 
                 self.db_controller.insert_one('Realtime', {
-                    'board_id': (category, no),
                     'site': SITE_PPOMPPU,
+                    'category': category,
+                    'no': int(no),
                     'title': title,
                     'url': domain + url,
                     'create_time': target_datetime,
@@ -62,7 +63,7 @@ class Ppomppu(AbstractCommunityWebsite):
         url = "https://www.ppomppu.co.kr/hot.php?id=&page=1&category=999"
         now = datetime.now()
         try:
-            response = requests.get(_url)
+            response = requests.get(url)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
         except Exception as e:
@@ -159,8 +160,8 @@ class Ppomppu(AbstractCommunityWebsite):
     def save_file(self, url):
         pass
 
-    def _post_already_exists(self, board_id):
-        existing_instance = self.db_controller.find('Realtime', {'board_id': board_id, 'site': SITE_PPOMPPU})
+    def _post_already_exists(self, category, no):
+        existing_instance = self.db_controller.find('Realtime', {'site': SITE_PPOMPPU, 'category': category, 'no': int(no)})
         return existing_instance
 
     def get_gpt_obj(self, board_id):

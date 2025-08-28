@@ -10,8 +10,24 @@ class MongoController(object):
         try:
             self.db = Database
             logger.info("Successfully connected to the database")
+            self._ensure_realtime_index()
         except ConnectionFailure as e:
             logger.error("Could not connect to the database: %s", e)
+
+    def _ensure_realtime_index(self):
+        try:
+            collection = self.db.get_collection('Realtime')
+            existing_indexes = collection.index_information()
+            if 'uniq_site_category_no' not in existing_indexes:
+                collection.create_index(
+                    [('site', pymongo.ASCENDING), ('category', pymongo.ASCENDING), ('no', pymongo.ASCENDING)],
+                    name='uniq_site_category_no',
+                    unique=True,
+                    partialFilterExpression={'site': {'$exists': True}, 'category': {'$exists': True}, 'no': {'$exists': True}}
+                )
+                logger.info("Created unique index uniq_site_category_no on Realtime(site, category, no)")
+        except Exception as e:
+            logger.warning("Failed to ensure Realtime index: %s", e)
 
         
     def find(self, collection_name, query):
