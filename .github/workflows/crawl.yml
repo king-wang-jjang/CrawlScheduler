@@ -7,7 +7,7 @@ on:
     branches: ["main"]
   pull_request: 
     branches: ["main"]
-
+  workflow_dispatch:
 # fastapi.yml (Django CI)workflow 에서 실행할 Job(작업) 정의
 jobs:
   # job 1(build) -> job 2(run)
@@ -107,4 +107,4 @@ jobs:
             sudo docker-compose down
             sudo docker rmi hwanju1596/crawl_scheduler:0.0.1 -f
             sudo docker-compose up -d
-      # sudo docker network connect kingwangjjang-network kingwangjjang_kingwangjjang-api-gateway_1
+      # sudo docker network connect kingwangjjang-network kingwangjjang_kingwangjjang-api-gateway_1 Action Test
