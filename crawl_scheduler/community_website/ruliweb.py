@@ -5,7 +5,7 @@ from datetime import datetime
 from crawl_scheduler.utils.loghandler import catch_exception
 import sys
 sys.excepthook = catch_exception
-from crawl_scheduler.db.mongo_controller import MongoController
+from crawl_scheduler.db.postgres_controller import PostgresController
 from crawl_scheduler.services.web_crawling.community_website.community_website import AbstractCommunityWebsite
 from crawl_scheduler.utils import FTPClient
 import logging
@@ -19,7 +19,7 @@ logger = crawler_logger()
 class Ruliweb(AbstractCommunityWebsite):
     def __init__(self):
         self.yyyymmdd = datetime.today().strftime('%Y%m%d')
-        self.db_controller = MongoController()
+        self.db_controller = PostgresController()
         try:
             logger.info(f"Initializing Ruliweb crawler for date {self.yyyymmdd}")
             self.ftp_client = FTPClient.FTPClient(

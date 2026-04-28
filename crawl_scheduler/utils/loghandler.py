@@ -1,10 +1,10 @@
 import logging
+import json
 import requests
 from colorama import Fore, init, Style
 from crawl_scheduler.config import Config
-from db.mongo_controller import MongoController
+from crawl_scheduler.db.postgres_controller import PostgresController
 import threading
-import bson
 import uuid
 from logging.handlers import TimedRotatingFileHandler
 import os 
@@ -155,12 +155,12 @@ class SlackWebhookHandler(BaseWebhookHandler):
         ]
 
 class DBLOGHandler(logging.Handler):
-    """ MongoDB에 로그를 저장하는 핸들러 """
+    """ PostgreSQL에 로그를 저장하는 핸들러 """
 
     def __init__(self):
         super().__init__()
         if Config().get_env("SERVER_RUN_MODE") == "TRUE":
-            self.db_controller = MongoController()
+            self.db_controller = PostgresController()
 
     def emit(self, record):
         log_entry = self.format(record)
@@ -188,12 +188,7 @@ class DBLOGHandler(logging.Handler):
         if "unique_id" not in data:
             data["unique_id"] = str(uuid.uuid4())
 
-        # Remove or convert non-serializable types to string
-        for key, value in data.items():
-            try:
-                bson.BSON.encode({key: value})
-            except Exception:
-                data[key] = str(value)
+        data = json.loads(json.dumps(data, ensure_ascii=False, default=str))
 
         try:
             self.db_controller.insert_one("log", data)

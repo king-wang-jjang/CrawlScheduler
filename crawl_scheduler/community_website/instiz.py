@@ -1,7 +1,7 @@
 import re
 from bs4 import BeautifulSoup
 import requests
-from crawl_scheduler.db.mongo_controller import MongoController
+from crawl_scheduler.db.postgres_controller import PostgresController
 from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
 from datetime import datetime
 from crawl_scheduler.utils import FTPClient
@@ -19,7 +19,7 @@ logger = crawler_logger()
 class Instiz(AbstractCommunityWebsite):
     def __init__(self):
         self.yyyymmdd = datetime.today().strftime('%Y%m%d')
-        self.db_controller = MongoController()
+        self.db_controller = PostgresController()
         try:
             logger.info(f"Initializing Instiz with date: {self.yyyymmdd}")
             self.ftp_client = FTPClient.FTPClient(

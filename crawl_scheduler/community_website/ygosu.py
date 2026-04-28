@@ -4,7 +4,7 @@ from typing import Tuple
 from bs4 import BeautifulSoup
 import requests
 from crawl_scheduler.config import Config
-from crawl_scheduler.db.mongo_controller import MongoController
+from crawl_scheduler.db.postgres_controller import PostgresController
 from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_YGOSU, DEFAULT_TAG
 from crawl_scheduler.utils.loghandler import logger
@@ -13,7 +13,7 @@ import uuid
 
 class Ygosu(AbstractCommunityWebsite):
     def __init__(self):
-        self.db_controller = MongoController()
+        self.db_controller = PostgresController()
 
     def get_daily_best(self):
         logger.info("Fetching daily best posts from Ygosu")
@@ -220,4 +220,3 @@ class Ygosu(AbstractCommunityWebsite):
         if not title or ':' not in title:  # 광고 및 공지 제외
             return True
         return False
-    

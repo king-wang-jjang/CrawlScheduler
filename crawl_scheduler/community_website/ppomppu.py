@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 import requests
 from datetime import datetime
 from crawl_scheduler.config import Config
-from crawl_scheduler.db.mongo_controller import MongoController
+from crawl_scheduler.db.postgres_controller import PostgresController
 from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_PPOMPPU, DEFAULT_TAG
 import os
@@ -11,7 +11,7 @@ from crawl_scheduler.utils.loghandler import logger
 
 class Ppomppu(AbstractCommunityWebsite):
     def __init__(self):
-        self.db_controller = MongoController()
+        self.db_controller = PostgresController()
         self.debugging_mode = False
 
     def get_daily_best(self):

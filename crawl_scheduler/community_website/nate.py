@@ -2,7 +2,7 @@ from datetime import datetime
 import os
 from bs4 import BeautifulSoup
 import requests
-from crawl_scheduler.db.mongo_controller import MongoController
+from crawl_scheduler.db.postgres_controller import PostgresController
 from crawl_scheduler.services.web_crawling.community_website.community_website import AbstractCommunityWebsite
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_NATE, DEFAULT_TAG
 from crawl_scheduler.utils import FTPClient
@@ -31,7 +31,7 @@ class NatePan(AbstractCommunityWebsite):
 
     def __init__(self):
         self.yyyymmdd = datetime.today().strftime('%Y%m%d')
-        self.db_controller = MongoController()
+        self.db_controller = PostgresController()
         try:
             logger.info(f"Initializing NatePan crawler for date {self.yyyymmdd}")
             self.ftp_client = FTPClient.FTPClient(

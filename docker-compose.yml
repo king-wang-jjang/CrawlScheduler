@@ -1,9 +1,16 @@
-version: '3.3'
-
 services:
   kingwangjjang-crawl:
     image: hwanju1596/crawl_scheduler:0.0.1
     env_file:
-      - .env
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${DOCKER_DATABASE_URL:?DOCKER_DATABASE_URL is required}
     volumes:
       - /mnt/kingwangjjang:/app/public
+    networks:
+      - kingwangjjang-network
+
+networks:
+  kingwangjjang-network:
+    external: true
