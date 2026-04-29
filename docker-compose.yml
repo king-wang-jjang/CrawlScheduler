@@ -1,9 +1,10 @@
+version: '3.3'
+
 services:
   kingwangjjang-crawl:
     image: ${DOCKERHUB_USERNAME}/crawl_scheduler:0.0.1
     env_file:
-      - path: .env
-        required: false
+      - .env
     environment:
       DATABASE_URL: ${DOCKER_DATABASE_URL:?DOCKER_DATABASE_URL is required}
     volumes:
