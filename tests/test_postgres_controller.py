@@ -7,6 +7,22 @@ SERVICE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SERVICE_ROOT))
 
 
+class FakeAnalyzer:
+    def analyze(self, content: str):
+        assert "ai title" in content
+        assert "body" in content
+        return {"summary": "AI 요약", "tags": ["유머", "핫딜"]}
+
+
+class UnexpectedAnalyzer:
+    def __init__(self):
+        self.calls = 0
+
+    def analyze(self, content: str):
+        self.calls += 1
+        return {"summary": "should not be stored", "tags": ["unexpected"]}
+
+
 def test_realtime_document_is_upserted_into_boards_table(tmp_path):
     from crawl_scheduler.db.postgres_controller import PostgresController
 
@@ -50,6 +66,37 @@ def test_realtime_document_is_upserted_into_boards_table(tmp_path):
     assert rows[0]["gpt_answer"] == "default answer"
     assert rows[0]["contents"] == [{"type": "text", "content": "body"}]
     assert rows[0]["create_time"] == created_at
+
+
+def test_realtime_document_stores_default_summary_without_ai_analysis(tmp_path):
+    from crawl_scheduler.constants import DEFAULT_GPT_ANSWER
+    from crawl_scheduler.db.postgres_controller import PostgresController
+
+    analyzer = UnexpectedAnalyzer()
+    controller = PostgresController(
+        database_url=f"sqlite:///{tmp_path / 'crawler.db'}",
+        analyzer=analyzer,
+    )
+
+    result = controller.insert_one(
+        "Realtime",
+        {
+            "site": "ygosu",
+            "category": "humor",
+            "no": 124,
+            "title": "ai title",
+            "url": "https://example.com/post/124",
+            "contents": [{"type": "text", "content": "body"}],
+            "gpt_answer": DEFAULT_GPT_ANSWER,
+            "tag": [],
+        },
+    )
+
+    rows = controller.find("Realtime", {"_id": result.inserted_id})
+
+    assert rows[0]["gpt_answer"] == DEFAULT_GPT_ANSWER
+    assert rows[0]["tags"] == []
+    assert analyzer.calls == 0
 
 
 def test_gpt_and_tag_collections_are_virtual_defaults(tmp_path):

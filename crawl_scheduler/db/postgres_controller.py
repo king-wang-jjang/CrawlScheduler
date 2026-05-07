@@ -3,11 +3,12 @@ from datetime import datetime, timezone
 import json
 from uuid import uuid4
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, inspect, select, text
 
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, DEFAULT_TAG
 from crawl_scheduler.db.models import Board, CrawlerLog
 from crawl_scheduler.db.postgres import Base, get_engine, get_session_factory
+from crawl_scheduler.utils.llm import LLM
 
 
 BOARD_COLLECTIONS = {"realtime", "daily"}
@@ -30,9 +31,12 @@ class UpdateResult:
 
 
 class PostgresController:
-    def __init__(self, database_url: str | None = None):
+    def __init__(self, database_url: str | None = None, analyzer: LLM | None = None):
         self.database_url = database_url
-        Base.metadata.create_all(bind=get_engine(database_url))
+        self.analyzer = analyzer or LLM()
+        engine = get_engine(database_url)
+        Base.metadata.create_all(bind=engine)
+        self._ensure_board_columns(engine)
 
     def find(self, collection_name: str, query: dict) -> list[dict]:
         collection = collection_name.lower()
@@ -97,9 +101,10 @@ class PostgresController:
         return self._list_boards(index=index, limit=limit, daily=True)
 
     def _upsert_board(self, collection_name: str, document: dict) -> Board:
-        values = self._board_values(collection_name, document)
+        source_id = self._source_id_from_document(collection_name, document)
         with get_session_factory(self.database_url)() as session:
-            board = session.scalar(select(Board).where(Board.source_id == values["source_id"]))
+            board = session.scalar(select(Board).where(Board.source_id == source_id))
+            values = self._board_values(collection_name, document, board)
             if board is None:
                 board = Board(**values)
                 session.add(board)
@@ -113,10 +118,11 @@ class PostgresController:
             session.refresh(board)
             return board
 
-    def _board_values(self, collection_name: str, document: dict) -> dict:
+    def _board_values(self, collection_name: str, document: dict, existing_board: Board | None = None) -> dict:
         site = str(document.get("site") or "unknown")
         category, no = self._category_and_no(collection_name, document)
         contents = document.get("contents")
+        summary, tags = self._analysis_values(document, existing_board)
         return {
             "source_id": self._source_id(site, category, no, document),
             "category": category,
@@ -125,9 +131,8 @@ class PostgresController:
             "title": str(document.get("title") or ""),
             "url": str(document.get("url") or ""),
             "contents": self._json_safe(contents),
-            "gpt_answer": self._coerce_text(
-                document.get("gpt_answer") or document.get("GPTAnswer") or DEFAULT_GPT_ANSWER
-            ),
+            "gpt_answer": summary,
+            "tags": tags,
             "thumbnail": document.get("thumbnail") or self._extract_thumbnail(contents),
             "comment_count": int(document.get("comment_count") or 0),
             "like_count": int(document.get("like_count") or 0),
@@ -145,6 +150,11 @@ class PostgresController:
         if category is None:
             category = collection_name
         return str(category), self._coerce_int(no)
+
+    def _source_id_from_document(self, collection_name: str, document: dict) -> str:
+        site = str(document.get("site") or "unknown")
+        category, no = self._category_and_no(collection_name, document)
+        return self._source_id(site, category, no, document)
 
     def _source_id(self, site: str, category: str, no: int, document: dict) -> str:
         if category and no:
@@ -226,6 +236,7 @@ class PostgresController:
             "url": board.url,
             "contents": board.contents,
             "gpt_answer": board.gpt_answer,
+            "tags": board.tags or [],
             "create_time": self._coerce_datetime(board.created_at),
             "thumbnail": board.thumbnail,
             "comment_count": int(board.comment_count or 0),
@@ -235,6 +246,71 @@ class PostgresController:
     @staticmethod
     def _board_attr_name(key: str) -> str:
         return "created_at" if key == "create_time" else key
+
+    def _analysis_values(self, document: dict, existing_board: Board | None) -> tuple[str | None, list]:
+        incoming_summary = self._coerce_text(
+            document.get("gpt_answer") or document.get("GPTAnswer") or DEFAULT_GPT_ANSWER
+        )
+        incoming_tags = self._normalize_tags(
+            document.get("tags") or document.get("Tag") or document.get("tag") or DEFAULT_TAG
+        )
+
+        if incoming_summary and incoming_summary != DEFAULT_GPT_ANSWER:
+            return incoming_summary, incoming_tags
+
+        if existing_board and existing_board.gpt_answer and existing_board.gpt_answer != DEFAULT_GPT_ANSWER:
+            return existing_board.gpt_answer, existing_board.tags or incoming_tags
+
+        return incoming_summary, incoming_tags
+
+    @staticmethod
+    def _analysis_text(document: dict, contents: object) -> str:
+        parts = [str(document.get("title") or "")]
+        if isinstance(contents, str):
+            parts.append(contents)
+        elif isinstance(contents, list):
+            for item in contents:
+                if isinstance(item, dict):
+                    value = item.get("content") or item.get("text") or item.get("alt")
+                    if value:
+                        parts.append(str(value))
+                elif item is not None:
+                    parts.append(str(item))
+        elif isinstance(contents, dict):
+            parts.extend(str(value) for value in contents.values() if value is not None)
+
+        return "\n".join(part for part in parts if part)
+
+    @staticmethod
+    def _normalize_tags(tags: object) -> list:
+        if tags is None:
+            return []
+        if isinstance(tags, str):
+            return [tags] if tags.strip() else []
+        if not isinstance(tags, list):
+            return []
+
+        normalized = []
+        for tag in tags:
+            if not isinstance(tag, str):
+                continue
+            value = tag.strip()
+            if value and value not in normalized:
+                normalized.append(value)
+            if len(normalized) >= 5:
+                break
+        return normalized
+
+    @staticmethod
+    def _ensure_board_columns(engine) -> None:
+        inspector = inspect(engine)
+        if not inspector.has_table("boards"):
+            return
+
+        existing_columns = {column["name"] for column in inspector.get_columns("boards")}
+        if "tags" not in existing_columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE boards ADD COLUMN tags JSON"))
 
     @staticmethod
     def _source_token(value: object) -> str:
