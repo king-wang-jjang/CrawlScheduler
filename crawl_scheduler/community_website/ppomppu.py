@@ -68,6 +68,7 @@ class Ppomppu(AbstractCommunityWebsite):
             soup = BeautifulSoup(response.text, 'html.parser')
         except Exception as e:
             logger.error(f"Get List Error: {e}")
+            return []
 
         board_list = []
 

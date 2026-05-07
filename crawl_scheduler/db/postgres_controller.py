@@ -37,6 +37,7 @@ class PostgresController:
         engine = get_engine(database_url)
         Base.metadata.create_all(bind=engine)
         self._ensure_board_columns(engine)
+        self._ensure_schema_compatibility(engine)
 
     def find(self, collection_name: str, query: dict) -> list[dict]:
         collection = collection_name.lower()
@@ -223,6 +224,14 @@ class PostgresController:
             session.commit()
             session.refresh(log)
             return InsertOneResult(log.id)
+
+    @staticmethod
+    def _ensure_schema_compatibility(engine) -> None:
+        if engine.dialect.name != "postgresql":
+            return
+
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE boards ALTER COLUMN no TYPE BIGINT"))
 
     def _board_to_document(self, board: Board) -> dict:
         return {

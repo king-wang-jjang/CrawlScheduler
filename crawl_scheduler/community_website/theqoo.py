@@ -97,6 +97,7 @@ class Theqoo(AbstractCommunityWebsite):
             soup = BeautifulSoup(html_content, 'html.parser')
         except Exception as e:
             logger.error(f"Get List Error: {e}")
+            return []
 
         board_list = []
         li_elements = soup.select('.hide_notice tr')
@@ -110,7 +111,7 @@ class Theqoo(AbstractCommunityWebsite):
                     no = url.split('hot/')[-1]
                     time_text = elements[3].get_text(strip=True)
 
-                    if '-' in time_text:
+                    if '-' in time_text or ':' not in time_text:
                         break  # Skip older posts
 
                     now = datetime.now()

@@ -170,7 +170,7 @@ class Ygosu(AbstractCommunityWebsite):
             soup = BeautifulSoup(req.text, 'html.parser')
         except Exception as e:
             logger.error(f"Get List Error: {e}")
-            return
+            return []
 
         for tr in soup.find_all('tr'):
             tit_element = tr.select_one('.tit a')

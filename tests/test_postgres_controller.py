@@ -117,3 +117,27 @@ def test_gpt_and_tag_collections_are_virtual_defaults(tmp_path):
     assert tag_result.inserted_id == ["default"]
     assert controller.find("GPT", {"site": "ygosu"}) == []
     assert controller.find("TAG", {"site": "ygosu"}) == []
+
+
+def test_large_board_numbers_are_preserved(tmp_path):
+    from crawl_scheduler.db.postgres_controller import PostgresController
+
+    controller = PostgresController(database_url=f"sqlite:///{tmp_path / 'crawler.db'}")
+    large_no = 4_190_928_872
+
+    controller.insert_one(
+        "Realtime",
+        {
+            "site": "theqoo",
+            "category": "hot",
+            "no": large_no,
+            "title": "large no title",
+            "url": "https://example.com/hot/4190928872",
+        },
+    )
+
+    rows = controller.find("Realtime", {"site": "theqoo", "category": "hot", "no": large_no})
+
+    assert len(rows) == 1
+    assert rows[0]["source_id"] == f"theqoo:hot:{large_no}"
+    assert rows[0]["no"] == large_no

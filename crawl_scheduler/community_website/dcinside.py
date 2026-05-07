@@ -63,6 +63,7 @@ class Dcinside(AbstractCommunityWebsite):
             soup = BeautifulSoup(html_content, 'html.parser')
         except Exception as e:
             logger.error(f"Get List Error: {e}")
+            return []
 
         board_list = []
         tr_elements = soup.select('tr.ub-content')
