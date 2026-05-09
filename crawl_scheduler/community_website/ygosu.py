@@ -107,28 +107,23 @@ class Ygosu(AbstractCommunityWebsite):
                 response.raise_for_status()
                 soup = BeautifulSoup(response.content, 'html.parser')
                 board_body = soup.find('div', class_='container')
-                paragraphs = board_body.find_all('p')
+                if not board_body:
+                    return content_list
+                seen_media_urls = set()
 
                 for element in board_body.find_all(['p', 'div'], recursive=True):  # <p>와 <div> 순회
                     img = element.find('img')
                     if img and 'src' in img.attrs:  # 이미지 처리
-                        img_url = img['src']
-                        img_response = requests.get(img_url)
-                        # Content-Type 확인
-                        content_type = img_response.headers.get('Content-Type')
-                        # 파일 저장 및 확장자 추가
-                        if content_type == "image/jpeg":
-                            ext = ".jpg"
-                        elif content_type == "image/png":
-                            ext = ".png"
-                        elif content_type == "image/webp":
-                            ext = ".webp"  
-                            
-                        unique_id = uuid.uuid4()
-                        filename = f"{unique_id}{ext}"
+                        img_url = super().media_url_from_tag(img, base_url=url)
+                        if not img_url or img_url in seen_media_urls:
+                            continue
+                        seen_media_urls.add(img_url)
                         try:
+                            filename = str(uuid.uuid4())
                             file_path = super().save_file(img_url, category=category, no=no, alt_text=filename)
-                            img_txt = super().img_to_text(os.path.join(Config().get_env('ROOT'), file_path))
+                            if not file_path:
+                                continue
+                            img_txt = super().img_to_text(os.path.join(Config().get_env('ROOT') or './media', file_path))
                             content_list.append({'type': 'image', 'path': file_path, 'content': img_txt})
                         except Exception as e:
                             logger.error(f"Error processing image {img_url}: {e}")
@@ -136,10 +131,14 @@ class Ygosu(AbstractCommunityWebsite):
                     if video:  # 비디오 처리
                         source = video.find('source')
                         if source and 'src' in source.attrs:
-                            video_url = source['src']
+                            video_url = super().media_url_from_tag(source, base_url=url)
+                            if not video_url or video_url in seen_media_urls:
+                                continue
+                            seen_media_urls.add(video_url)
                             try:
                                 file_path = super().save_file(video_url, category=category, no=no)  # 비디오 저장
-                                content_list.append({'type': 'video', 'path': file_path})
+                                if file_path:
+                                    content_list.append({'type': 'video', 'path': file_path})
                             except Exception as e:
                                 logger.error(f"Error processing video {video_url}: {e}")
                     text = element.text.strip()

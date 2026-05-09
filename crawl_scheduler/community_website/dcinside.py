@@ -136,18 +136,25 @@ class Dcinside(AbstractCommunityWebsite):
 
             for p in paragraphs:
                 if p.find('img'):
-                    img_url = p.find('img')['src']
+                    img_url = super().media_url_from_tag(p.find('img'), base_url=url)
+                    if not img_url:
+                        continue
                     try:
                         file_path = super().save_file(img_url, category=category, no=no, headers=self.g_headers[0])
-                        img_txt = super().img_to_text(os.path.join(Config().get_env('ROOT'), file_path))
+                        if not file_path:
+                            continue
+                        img_txt = super().img_to_text(os.path.join(Config().get_env('ROOT') or './media', file_path))
                         content_list.append({'type': 'image', 'path': file_path, 'content': img_txt})
                     except Exception as e:
                         logger.error(f"Error processing image: {url} {e}")
                 elif p.find('video'):
-                    video_url = "https:" + p.find('video').find('source')['src']
+                    video_url = super().media_url_from_tag(p.find('video').find('source'), base_url=url)
+                    if not video_url:
+                        continue
                     try:
                         file_path = super().save_file(video_url, category=category, no=no)
-                        content_list.append({'type': 'video', 'path': file_path})
+                        if file_path:
+                            content_list.append({'type': 'video', 'path': file_path})
                     except Exception as e:
                         logger.error(f"Error saving video: {e}")
                 else:

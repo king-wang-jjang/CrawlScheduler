@@ -124,6 +124,11 @@ class PostgresController:
         category, no = self._category_and_no(collection_name, document)
         contents = document.get("contents")
         summary, tags = self._analysis_values(document, existing_board)
+        analysis_status, analysis_updated_at = self._analysis_queue_values(
+            document,
+            existing_board,
+            summary,
+        )
         return {
             "source_id": self._source_id(site, category, no, document),
             "category": category,
@@ -134,6 +139,13 @@ class PostgresController:
             "contents": self._json_safe(contents),
             "gpt_answer": summary,
             "tags": tags,
+            "analysis_status": analysis_status,
+            "analysis_priority": int(document.get("analysis_priority") or getattr(existing_board, "analysis_priority", 0) or 0),
+            "analysis_requested_at": document.get("analysis_requested_at") or getattr(existing_board, "analysis_requested_at", None),
+            "analysis_started_at": getattr(existing_board, "analysis_started_at", None),
+            "analysis_updated_at": analysis_updated_at,
+            "analysis_retry_count": int(document.get("analysis_retry_count") or getattr(existing_board, "analysis_retry_count", 0) or 0),
+            "analysis_error": getattr(existing_board, "analysis_error", None),
             "thumbnail": document.get("thumbnail") or self._extract_thumbnail(contents),
             "comment_count": int(document.get("comment_count") or 0),
             "like_count": int(document.get("like_count") or 0),
@@ -246,6 +258,13 @@ class PostgresController:
             "contents": board.contents,
             "gpt_answer": board.gpt_answer,
             "tags": board.tags or [],
+            "analysis_status": board.analysis_status,
+            "analysis_priority": int(board.analysis_priority or 0),
+            "analysis_retry_count": int(board.analysis_retry_count or 0),
+            "analysis_error": board.analysis_error,
+            "analysis_requested_at": board.analysis_requested_at,
+            "analysis_started_at": board.analysis_started_at,
+            "analysis_updated_at": board.analysis_updated_at,
             "create_time": self._coerce_datetime(board.created_at),
             "thumbnail": board.thumbnail,
             "comment_count": int(board.comment_count or 0),
@@ -271,6 +290,23 @@ class PostgresController:
             return existing_board.gpt_answer, existing_board.tags or incoming_tags
 
         return incoming_summary, incoming_tags
+
+    @staticmethod
+    def _analysis_queue_values(document: dict, existing_board: Board | None, summary: str | None) -> tuple[str, datetime | None]:
+        incoming_status = document.get("analysis_status")
+        existing_status = getattr(existing_board, "analysis_status", None)
+        existing_updated_at = getattr(existing_board, "analysis_updated_at", None)
+
+        if summary and summary != DEFAULT_GPT_ANSWER:
+            return "done", datetime.now(timezone.utc)
+
+        if incoming_status in {"pending", "processing", "done", "failed"}:
+            return incoming_status, datetime.now(timezone.utc)
+
+        if existing_status:
+            return existing_status, existing_updated_at
+
+        return "pending", None
 
     @staticmethod
     def _analysis_text(document: dict, contents: object) -> str:
@@ -317,9 +353,27 @@ class PostgresController:
             return
 
         existing_columns = {column["name"] for column in inspector.get_columns("boards")}
-        if "tags" not in existing_columns:
-            with engine.begin() as connection:
-                connection.execute(text("ALTER TABLE boards ADD COLUMN tags JSON"))
+        column_definitions = {
+            "tags": "JSON",
+            "analysis_status": "VARCHAR(32) NOT NULL DEFAULT 'pending'",
+            "analysis_priority": "INTEGER NOT NULL DEFAULT 0",
+            "analysis_requested_at": "TIMESTAMP",
+            "analysis_started_at": "TIMESTAMP",
+            "analysis_updated_at": "TIMESTAMP",
+            "analysis_retry_count": "INTEGER NOT NULL DEFAULT 0",
+            "analysis_error": "TEXT",
+        }
+        missing_columns = {
+            column_name: definition
+            for column_name, definition in column_definitions.items()
+            if column_name not in existing_columns
+        }
+        if not missing_columns:
+            return
+
+        with engine.begin() as connection:
+            for column_name, definition in missing_columns.items():
+                connection.execute(text(f"ALTER TABLE boards ADD COLUMN {column_name} {definition}"))
 
     @staticmethod
     def _source_token(value: object) -> str:

@@ -2,6 +2,7 @@ import re
 from bs4 import BeautifulSoup
 import requests
 from datetime import datetime
+from urllib.parse import urljoin, urlparse
 from crawl_scheduler.config import Config
 from crawl_scheduler.db.postgres_controller import PostgresController
 from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
@@ -67,18 +68,25 @@ class Theqoo(AbstractCommunityWebsite):
                 find_all = write_div.find_all(['p', 'div'])
                 for p in find_all:
                     if p.find('img'):
-                        img_url = p.find('img')['src']
+                        img_url = super().media_url_from_tag(p.find('img'), base_url=_url)
+                        if not img_url:
+                            continue
                         try:
                             file_path = super().save_file(img_url, category=category, no=no)
-                            img_txt = super().img_to_text(os.path.join(Config().get_env('ROOT')), file_path)
+                            if not file_path:
+                                continue
+                            img_txt = super().img_to_text(os.path.join(Config().get_env('ROOT') or './media', file_path))
                             content_list.append({'type': 'image', 'path': file_path, 'content': img_txt})
                         except Exception as e:
                             logger.error(f"Error processing image: {url} {e}")
                     elif p.find('video'):
-                        video_url = "https:" + p.find('video').find('source')['src']
+                        video_url = super().media_url_from_tag(p.find('video').find('source'), base_url=_url)
+                        if not video_url:
+                            continue
                         try:
                             file_path = super().save_file(video_url, category=category, no=no)
-                            content_list.append({'type': 'video', 'path': file_path})
+                            if file_path:
+                                content_list.append({'type': 'video', 'path': file_path})
                         except Exception as e:
                             logger.error(f"Error saving video: {e}")
                     else:
@@ -107,8 +115,11 @@ class Theqoo(AbstractCommunityWebsite):
             if len(elements) > 1:
                 try:
                     title = elements[2].get_text(strip=True)
-                    url = "https://theqoo.net" + elements[2].find('a')['href']
-                    no = url.split('hot/')[-1]
+                    url = urljoin("https://theqoo.net", elements[2].find('a')['href'])
+                    path_parts = [part for part in urlparse(url).path.split('/') if part]
+                    if len(path_parts) < 2 or path_parts[0] != 'hot' or not path_parts[1].isdigit():
+                        continue
+                    no = path_parts[1]
                     time_text = elements[3].get_text(strip=True)
 
                     if '-' in time_text or ':' not in time_text:

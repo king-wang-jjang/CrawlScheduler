@@ -2,6 +2,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+from bs4 import BeautifulSoup
+
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SERVICE_ROOT))
@@ -91,3 +93,72 @@ def test_save_file_sanitizes_query_only_media_urls(monkeypatch, tmp_path):
     assert relative_path
     assert "?" not in Path(relative_path).name
     assert Path(relative_path).suffix == ".webp"
+
+
+def test_save_file_does_not_write_failed_response(monkeypatch, tmp_path):
+    import crawl_scheduler.community_website.community_website as community_website
+
+    class ConcreteCrawler(community_website.AbstractCommunityWebsite):
+        def get_daily_best(self):
+            pass
+
+        def get_realtime_best(self):
+            pass
+
+        def get_board_contents(self, board_id):
+            pass
+
+        def is_ad(self, title) -> bool:
+            return False
+
+        def get_gpt_obj(self, url):
+            pass
+
+        def get_board_list(self):
+            pass
+
+    monkeypatch.setenv("ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        community_website.requests,
+        "get",
+        lambda *args, **kwargs: SimpleNamespace(
+            status_code=404,
+            headers={"Content-Type": "text/html"},
+            content=b"not-found",
+        ),
+    )
+
+    crawler = ConcreteCrawler("20260428")
+
+    assert not crawler.save_file(
+        "https://example.com/missing.jpg",
+        category="humor",
+        no=1,
+    )
+    assert list(tmp_path.rglob("*.*")) == []
+
+
+def test_media_url_from_tag_prefers_real_lazy_image_over_placeholder():
+    import crawl_scheduler.community_website.community_website as community_website
+
+    soup = BeautifulSoup(
+        '<img src="https://nstatic.dcinside.com/dc/m/img/gallview_loading_ori.gif" '
+        'data-original="//dcimg6.dcinside.co.kr/viewimage.php?id=real">',
+        "html.parser",
+    )
+
+    assert (
+        community_website.AbstractCommunityWebsite.media_url_from_tag(soup.img)
+        == "https://dcimg6.dcinside.co.kr/viewimage.php?id=real"
+    )
+
+
+def test_normalize_media_url_repairs_duplicate_scheme():
+    import crawl_scheduler.community_website.community_website as community_website
+
+    assert (
+        community_website.AbstractCommunityWebsite.normalize_media_url(
+            "https:https://dcimg6.dcinside.co.kr/viewimage.php?id=real"
+        )
+        == "https://dcimg6.dcinside.co.kr/viewimage.php?id=real"
+    )

@@ -61,9 +61,10 @@ class Ppomppu(AbstractCommunityWebsite):
     def get_board_list(self):
         """ 게시판에서 URL, 카테고리, 게시글 번호, 생성 시간, 제목 추출 """
         url = "https://www.ppomppu.co.kr/hot.php?id=&page=1&category=999"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
         now = datetime.now()
         try:
-            response = requests.get(url)
+            response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
         except Exception as e:
@@ -138,18 +139,25 @@ class Ppomppu(AbstractCommunityWebsite):
                     
                 for p in paragraphs:
                     if p.find('img'):
-                        img_url = "https:" + p.find('img')['src']
+                        img_url = super().media_url_from_tag(p.find('img'), base_url=url)
+                        if not img_url:
+                            continue
                         try:
                             file_path = super().save_file(img_url, category=category, no=no)
-                            img_txt = super().img_to_text(os.path.join(Config().get_env('ROOT'), file_path))
+                            if not file_path:
+                                continue
+                            img_txt = super().img_to_text(os.path.join(Config().get_env('ROOT') or './media', file_path))
                             content_list.append({'type': 'image', 'path': file_path, 'content': img_txt})
                         except Exception as e:
                             logger.error(f"Error processing image: {url} {e}")
                     elif p.find('video'):
-                        video_url = "https:" + p.find('video').find('source')['src']
+                        video_url = super().media_url_from_tag(p.find('video').find('source'), base_url=url)
+                        if not video_url:
+                            continue
                         try:
                             file_path = super().save_file(video_url, category=category, no=no)
-                            content_list.append({'type': 'video', 'path': file_path})
+                            if file_path:
+                                content_list.append({'type': 'video', 'path': file_path})
                         except Exception as e:
                             logger.error(f"Error saving video: {e}")
                     else:

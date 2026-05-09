@@ -1,7 +1,7 @@
 import os
 import re
 from abc import ABC, abstractmethod
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -46,18 +46,23 @@ class AbstractCommunityWebsite(ABC):
 
     def save_file(self, url, category, no, alt_text=None, headers=None):
         try:
+            media_url = self.normalize_media_url(url)
+            if not media_url:
+                logger.error("Invalid media URL for %s/%s: %s", category, no, url)
+                return False
+
             if not headers:
                 headers = {"User-Agent": "Mozilla/5.0", "Cache-Control": "no-cache"}
 
-            response = requests.get(url, headers=headers, stream=True)
+            response = requests.get(media_url, headers=headers, stream=True, timeout=10)
             child_class_name = self.__class__.__name__
-            root_path = Config().get_env("ROOT")
+            root_path = Config().get_env("ROOT") or "./media"
             path = os.path.join(root_path, child_class_name, str(category), str(no))
 
-            logger.info("Saving media from URL: %s", url)
+            logger.info("Saving media from URL: %s", media_url)
             os.makedirs(path, exist_ok=True)
 
-            file_name = alt_text or self._file_name_from_url(url)
+            file_name = alt_text or self._file_name_from_url(media_url)
             detected_extension = None
 
             if response.status_code == 200:
@@ -69,7 +74,8 @@ class AbstractCommunityWebsite(ABC):
                     response.headers.get("Content-Type")
                 )
             else:
-                logger.error("Failed to fetch media from %s: %s", url, response.status_code)
+                logger.error("Failed to fetch media from %s: %s", media_url, response.status_code)
+                return False
 
             file_name = self._safe_file_name(file_name)
             file_name_without_extension, file_extension = os.path.splitext(file_name)
@@ -115,10 +121,62 @@ class AbstractCommunityWebsite(ABC):
             "video/webm": ".webm",
         }.get(media_type)
 
+    @classmethod
+    def media_url_from_tag(cls, tag, base_url=None):
+        if not tag:
+            return None
+
+        candidates = []
+        for attr in ("data-original", "data-src", "data-lazy-src", "data-url", "src"):
+            value = tag.get(attr)
+            if value:
+                candidates.append(value)
+
+        for candidate in candidates:
+            media_url = cls.normalize_media_url(candidate, base_url=base_url)
+            if media_url and not cls._is_placeholder_media_url(media_url):
+                return media_url
+
+        return None
+
+    @staticmethod
+    def normalize_media_url(url, base_url=None):
+        if not url:
+            return None
+
+        media_url = str(url).strip()
+        if not media_url:
+            return None
+
+        media_url = re.sub(r"^https?://(https?://)", r"\1", media_url, flags=re.IGNORECASE)
+        media_url = re.sub(r"^(https?:)(https?://)", r"\2", media_url, flags=re.IGNORECASE)
+
+        if media_url.startswith("//"):
+            return f"https:{media_url}"
+
+        parsed_url = urlparse(media_url)
+        if parsed_url.scheme and parsed_url.netloc:
+            return media_url
+
+        if base_url:
+            return urljoin(base_url, media_url)
+
+        return None
+
     @staticmethod
     def _file_name_from_url(url):
         parsed_url = urlparse(url)
         return os.path.basename(parsed_url.path) or parsed_url.query or "download"
+
+    @staticmethod
+    def _is_placeholder_media_url(url):
+        parsed_url = urlparse(url)
+        basename = os.path.basename(parsed_url.path).lower()
+        return basename in {
+            "blank.gif",
+            "loading.gif",
+            "gallview_loading_ori.gif",
+        }
 
     @staticmethod
     def _safe_file_name(file_name):
