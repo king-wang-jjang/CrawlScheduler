@@ -6,6 +6,11 @@ from uuid import uuid4
 from sqlalchemy import desc, inspect, select, text
 
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, DEFAULT_TAG
+from crawl_scheduler.crawled_content import (
+    extract_llm_text,
+    first_thumbnail_path,
+    normalize_contents,
+)
 from crawl_scheduler.db.models import Board, CrawlerLog
 from crawl_scheduler.db.postgres import Base, get_engine, get_session_factory
 from crawl_scheduler.utils.llm import LLM
@@ -122,7 +127,7 @@ class PostgresController:
     def _board_values(self, collection_name: str, document: dict, existing_board: Board | None = None) -> dict:
         site = str(document.get("site") or "unknown")
         category, no = self._category_and_no(collection_name, document)
-        contents = document.get("contents")
+        contents = normalize_contents(document.get("contents"))
         summary, tags = self._analysis_values(document, existing_board)
         analysis_status, analysis_updated_at = self._analysis_queue_values(
             document,
@@ -146,7 +151,7 @@ class PostgresController:
             "analysis_updated_at": analysis_updated_at,
             "analysis_retry_count": int(document.get("analysis_retry_count") or getattr(existing_board, "analysis_retry_count", 0) or 0),
             "analysis_error": getattr(existing_board, "analysis_error", None),
-            "thumbnail": document.get("thumbnail") or self._extract_thumbnail(contents),
+            "thumbnail": document.get("thumbnail") or first_thumbnail_path(contents),
             "comment_count": int(document.get("comment_count") or 0),
             "like_count": int(document.get("like_count") or 0),
             "created_at": self._coerce_datetime(document.get("create_time") or document.get("created_at")),
@@ -310,21 +315,7 @@ class PostgresController:
 
     @staticmethod
     def _analysis_text(document: dict, contents: object) -> str:
-        parts = [str(document.get("title") or "")]
-        if isinstance(contents, str):
-            parts.append(contents)
-        elif isinstance(contents, list):
-            for item in contents:
-                if isinstance(item, dict):
-                    value = item.get("content") or item.get("text") or item.get("alt")
-                    if value:
-                        parts.append(str(value))
-                elif item is not None:
-                    parts.append(str(item))
-        elif isinstance(contents, dict):
-            parts.extend(str(value) for value in contents.values() if value is not None)
-
-        return "\n".join(part for part in parts if part)
+        return extract_llm_text(document.get("title"), contents)
 
     @staticmethod
     def _normalize_tags(tags: object) -> list:
@@ -408,11 +399,7 @@ class PostgresController:
 
     @staticmethod
     def _extract_thumbnail(contents: object) -> str | None:
-        if isinstance(contents, list):
-            for item in contents:
-                if isinstance(item, dict) and item.get("type") == "image":
-                    return item.get("path")
-        return None
+        return first_thumbnail_path(contents)
 
     @staticmethod
     def _json_safe(value: object):

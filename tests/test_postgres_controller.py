@@ -64,7 +64,7 @@ def test_realtime_document_is_upserted_into_boards_table(tmp_path):
     assert rows[0]["source_id"] == "ygosu:humor:123"
     assert rows[0]["title"] == "updated title"
     assert rows[0]["gpt_answer"] == "default answer"
-    assert rows[0]["contents"] == [{"type": "text", "content": "body"}]
+    assert rows[0]["contents"] == [{"type": "text", "text": "body"}]
     assert rows[0]["create_time"] == created_at
 
 
@@ -141,3 +141,32 @@ def test_large_board_numbers_are_preserved(tmp_path):
     assert len(rows) == 1
     assert rows[0]["source_id"] == f"theqoo:hot:{large_no}"
     assert rows[0]["no"] == large_no
+
+
+def test_insert_normalizes_crawled_contents_and_extracts_thumbnail(tmp_path):
+    from crawl_scheduler.db.postgres_controller import PostgresController
+
+    controller = PostgresController(database_url=f"sqlite:///{tmp_path / 'crawler.db'}")
+
+    controller.insert_one(
+        "Realtime",
+        {
+            "site": "dcinside",
+            "category": "humor",
+            "no": 777,
+            "title": "normalized title",
+            "url": "https://example.com/post/777",
+            "contents": [
+                {"type": "image", "path": "Dcinside/humor/777/image.webp", "content": "ocr text"},
+                {"type": "text", "content": "body text"},
+            ],
+        },
+    )
+
+    rows = controller.find("Realtime", {"site": "dcinside", "category": "humor", "no": 777})
+
+    assert rows[0]["contents"] == [
+        {"type": "image", "media_path": "Dcinside/humor/777/image.webp", "text": "ocr text"},
+        {"type": "text", "text": "body text"},
+    ]
+    assert rows[0]["thumbnail"] == "Dcinside/humor/777/image.webp"

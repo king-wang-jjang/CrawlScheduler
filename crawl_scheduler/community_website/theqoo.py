@@ -4,6 +4,7 @@ import requests
 from datetime import datetime
 from urllib.parse import urljoin, urlparse
 from crawl_scheduler.config import Config
+from crawl_scheduler.crawled_content import image_block, text_block, video_block
 from crawl_scheduler.db.postgres_controller import PostgresController
 from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_THEQOO, DEFAULT_TAG
@@ -76,7 +77,9 @@ class Theqoo(AbstractCommunityWebsite):
                             if not file_path:
                                 continue
                             img_txt = super().img_to_text(os.path.join(Config().get_env('ROOT') or './media', file_path))
-                            content_list.append({'type': 'image', 'path': file_path, 'content': img_txt})
+                            block = image_block(media_path=file_path, source_url=img_url, text=img_txt)
+                            if block:
+                                content_list.append(block)
                         except Exception as e:
                             logger.error(f"Error processing image: {url} {e}")
                     elif p.find('video'):
@@ -86,11 +89,15 @@ class Theqoo(AbstractCommunityWebsite):
                         try:
                             file_path = super().save_file(video_url, category=category, no=no)
                             if file_path:
-                                content_list.append({'type': 'video', 'path': file_path})
+                                block = video_block(media_path=file_path, source_url=video_url)
+                                if block:
+                                    content_list.append(block)
                         except Exception as e:
                             logger.error(f"Error saving video: {e}")
                     else:
-                        content_list.append({'type': 'text', 'content': p.text.strip()})
+                        block = text_block(p.text)
+                        if block:
+                            content_list.append(block)
             return content_list
         except Exception as e:
             logger.error(f"Error fetching board contents for {no}: {e}")
@@ -114,6 +121,10 @@ class Theqoo(AbstractCommunityWebsite):
             elements = li.find_all('td')
             if len(elements) > 1:
                 try:
+                    rank_text = elements[0].get_text(strip=True)
+                    if not rank_text.isdigit():
+                        continue
+
                     title = elements[2].get_text(strip=True)
                     url = urljoin("https://theqoo.net", elements[2].find('a')['href'])
                     path_parts = [part for part in urlparse(url).path.split('/') if part]

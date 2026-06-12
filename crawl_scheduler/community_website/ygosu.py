@@ -4,6 +4,7 @@ from typing import Tuple
 from bs4 import BeautifulSoup
 import requests
 from crawl_scheduler.config import Config
+from crawl_scheduler.crawled_content import image_block, text_block, video_block
 from crawl_scheduler.db.postgres_controller import PostgresController
 from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_YGOSU, DEFAULT_TAG
@@ -124,7 +125,9 @@ class Ygosu(AbstractCommunityWebsite):
                             if not file_path:
                                 continue
                             img_txt = super().img_to_text(os.path.join(Config().get_env('ROOT') or './media', file_path))
-                            content_list.append({'type': 'image', 'path': file_path, 'content': img_txt})
+                            block = image_block(media_path=file_path, source_url=img_url, text=img_txt)
+                            if block:
+                                content_list.append(block)
                         except Exception as e:
                             logger.error(f"Error processing image {img_url}: {e}")
                     video = element.find('video')
@@ -138,12 +141,15 @@ class Ygosu(AbstractCommunityWebsite):
                             try:
                                 file_path = super().save_file(video_url, category=category, no=no)  # 비디오 저장
                                 if file_path:
-                                    content_list.append({'type': 'video', 'path': file_path})
+                                    block = video_block(media_path=file_path, source_url=video_url)
+                                    if block:
+                                        content_list.append(block)
                             except Exception as e:
                                 logger.error(f"Error processing video {video_url}: {e}")
                     text = element.text.strip()
-                    if text:
-                        content_list.append({'type': 'text', 'content': text})
+                    block = text_block(text)
+                    if block:
+                        content_list.append(block)
             
             except Exception as e:
                 logger.error(f"Error fetching board contents for {no}: {e}")
