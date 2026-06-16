@@ -4,6 +4,10 @@ WORKDIR /app
 
 RUN pip install poetry
 
+RUN apt-get update -y \
+    && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY ./pyproject.toml ./poetry.lock* /app/
 
 RUN poetry cache clear --all pypi

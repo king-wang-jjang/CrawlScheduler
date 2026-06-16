@@ -9,7 +9,7 @@ SERVICE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SERVICE_ROOT))
 
 
-def test_community_website_imports_without_ocr_dependencies():
+def test_community_website_delegates_image_text_to_ocr_extractor(monkeypatch):
     import crawl_scheduler.community_website.community_website as community_website
 
     class ConcreteCrawler(community_website.AbstractCommunityWebsite):
@@ -31,14 +31,31 @@ def test_community_website_imports_without_ocr_dependencies():
         def get_board_list(self):
             pass
 
+    calls = []
+
+    def fake_extract_text_from_image(img_path):
+        calls.append(img_path)
+        return "이미지 안의 한국어"
+
+    monkeypatch.setattr(
+        community_website,
+        "extract_text_from_image",
+        fake_extract_text_from_image,
+    )
+
     crawler = ConcreteCrawler("20260428")
 
-    assert crawler.img_to_text("image.jpg") is None
+    assert crawler.img_to_text("image.jpg") == "이미지 안의 한국어"
+    assert calls == ["image.jpg"]
 
 
-def test_project_dependencies_do_not_include_ocr_stack():
+def test_project_dependencies_use_paddle_ocr_not_tesseract():
     pyproject = (SERVICE_ROOT / "pyproject.toml").read_text(encoding="utf-8").lower()
     dockerfile = (SERVICE_ROOT / "Dockerfile").read_text(encoding="utf-8").lower()
+
+    assert "paddleocr" in pyproject
+    assert "paddlepaddle" in pyproject
+    assert "libgl1" in dockerfile
 
     for dependency in ["pytesseract", "opencv-python"]:
         assert dependency not in pyproject

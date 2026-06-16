@@ -6,6 +6,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 
 from crawl_scheduler.config import Config
+from crawl_scheduler.ocr import extract_text_from_image
 from crawl_scheduler.utils.loghandler import logger
 
 
@@ -103,8 +104,8 @@ class AbstractCommunityWebsite(ABC):
             return False
 
     def img_to_text(self, img_path, *unused_args):
-        logger.debug("OCR disabled; skipping image text extraction for %s", img_path)
-        return None
+        logger.info("Extracting image text with OCR from %s", img_path)
+        return extract_text_from_image(img_path)
 
     @staticmethod
     def _extension_from_content_type(content_type):
