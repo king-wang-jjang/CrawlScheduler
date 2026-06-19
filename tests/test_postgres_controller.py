@@ -170,3 +170,53 @@ def test_insert_normalizes_crawled_contents_and_extracts_thumbnail(tmp_path):
         {"type": "text", "text": "body text"},
     ]
     assert rows[0]["thumbnail"] == "Dcinside/humor/777/image.webp"
+
+
+def test_insert_uses_metadata_image_as_thumbnail_fallback(tmp_path):
+    from crawl_scheduler.db.postgres_controller import PostgresController
+
+    controller = PostgresController(database_url=f"sqlite:///{tmp_path / 'crawler.db'}")
+
+    controller.insert_one(
+        "Realtime",
+        {
+            "site": "theqoo",
+            "category": "hot",
+            "no": 778,
+            "title": "metadata title",
+            "url": "https://example.com/post/778",
+            "contents": [
+                {"type": "text", "content": "body text"},
+                {"type": "metadata", "image_url": "https://cdn.example.com/og.jpg"},
+            ],
+        },
+    )
+
+    rows = controller.find("Realtime", {"site": "theqoo", "category": "hot", "no": 778})
+
+    assert rows[0]["thumbnail"] == "https://cdn.example.com/og.jpg"
+
+
+def test_insert_prefers_local_image_thumbnail_over_metadata_fallback(tmp_path):
+    from crawl_scheduler.db.postgres_controller import PostgresController
+
+    controller = PostgresController(database_url=f"sqlite:///{tmp_path / 'crawler.db'}")
+
+    controller.insert_one(
+        "Realtime",
+        {
+            "site": "dcinside",
+            "category": "humor",
+            "no": 779,
+            "title": "local image title",
+            "url": "https://example.com/post/779",
+            "contents": [
+                {"type": "metadata", "image_url": "https://cdn.example.com/og.jpg"},
+                {"type": "image", "media_path": "Dcinside/humor/779/image.webp"},
+            ],
+        },
+    )
+
+    rows = controller.find("Realtime", {"site": "dcinside", "category": "humor", "no": 779})
+
+    assert rows[0]["thumbnail"] == "Dcinside/humor/779/image.webp"

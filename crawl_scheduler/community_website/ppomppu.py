@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 import requests
 from datetime import datetime
 from crawl_scheduler.config import Config
-from crawl_scheduler.crawled_content import image_block, text_block, video_block
+from crawl_scheduler.crawled_content import image_block, metadata_image_block, text_block, video_block
 from crawl_scheduler.db.postgres_controller import PostgresController
 from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_PPOMPPU, DEFAULT_TAG
@@ -131,6 +131,11 @@ class Ppomppu(AbstractCommunityWebsite):
                 response = requests.get(url, headers=headers)
                 response.raise_for_status()
                 soup = BeautifulSoup(response.text, 'lxml')
+                metadata_block = metadata_image_block(
+                    super().metadata_image_url_from_soup(soup, base_url=url)
+                )
+                if metadata_block:
+                    content_list.append(metadata_block)
                 board_body = soup.find('td', class_='board-contents')
                 # if category == "freeboard":
                 #     logger.info(soup)

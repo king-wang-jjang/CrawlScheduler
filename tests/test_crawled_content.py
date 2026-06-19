@@ -50,3 +50,29 @@ def test_extract_llm_text_uses_ordered_text_and_ocr_without_media_paths():
 
     assert text == "seed title\n[image] ocr text\nreal body"
     assert "Dcinside/humor/123" not in text
+
+
+def test_metadata_image_block_can_supply_thumbnail_fallback():
+    from crawl_scheduler.crawled_content import first_thumbnail_path, normalize_contents
+
+    contents = [
+        {"type": "text", "text": "body only"},
+        {"type": "metadata", "image_url": "https://example.com/og.jpg"},
+    ]
+
+    assert normalize_contents(contents) == [
+        {"type": "text", "text": "body only"},
+        {"type": "metadata", "image_url": "https://example.com/og.jpg"},
+    ]
+    assert first_thumbnail_path(contents) == "https://example.com/og.jpg"
+
+
+def test_local_image_thumbnail_takes_precedence_over_metadata_image():
+    from crawl_scheduler.crawled_content import first_thumbnail_path
+
+    contents = [
+        {"type": "metadata", "image_url": "https://example.com/og.jpg"},
+        {"type": "image", "media_path": "Dcinside/humor/123/image.webp"},
+    ]
+
+    assert first_thumbnail_path(contents) == "Dcinside/humor/123/image.webp"

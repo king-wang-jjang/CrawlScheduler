@@ -179,3 +179,40 @@ def test_normalize_media_url_repairs_duplicate_scheme():
         )
         == "https://dcimg6.dcinside.co.kr/viewimage.php?id=real"
     )
+
+
+def test_metadata_image_url_from_soup_prefers_open_graph_image():
+    import crawl_scheduler.community_website.community_website as community_website
+
+    soup = BeautifulSoup(
+        '<html><head>'
+        '<meta property="og:image" content="//cdn.example.com/post.jpg">'
+        '<meta name="twitter:image" content="https://cdn.example.com/twitter.jpg">'
+        '</head></html>',
+        "html.parser",
+    )
+
+    assert (
+        community_website.AbstractCommunityWebsite.metadata_image_url_from_soup(
+            soup,
+            base_url="https://example.com/post/1",
+        )
+        == "https://cdn.example.com/post.jpg"
+    )
+
+
+def test_metadata_image_url_from_soup_supports_image_src_link():
+    import crawl_scheduler.community_website.community_website as community_website
+
+    soup = BeautifulSoup(
+        '<html><head><link rel="image_src" href="/images/post.jpg"></head></html>',
+        "html.parser",
+    )
+
+    assert (
+        community_website.AbstractCommunityWebsite.metadata_image_url_from_soup(
+            soup,
+            base_url="https://example.com/post/1",
+        )
+        == "https://example.com/images/post.jpg"
+    )

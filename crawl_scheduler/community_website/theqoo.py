@@ -4,7 +4,7 @@ import requests
 from datetime import datetime
 from urllib.parse import urljoin, urlparse
 from crawl_scheduler.config import Config
-from crawl_scheduler.crawled_content import image_block, text_block, video_block
+from crawl_scheduler.crawled_content import image_block, metadata_image_block, text_block, video_block
 from crawl_scheduler.db.postgres_controller import PostgresController
 from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_THEQOO, DEFAULT_TAG
@@ -63,6 +63,11 @@ class Theqoo(AbstractCommunityWebsite):
             html_content = req.text
             soup = BeautifulSoup(html_content, 'html.parser')
             content_list = []
+            metadata_block = metadata_image_block(
+                super().metadata_image_url_from_soup(soup, base_url=_url)
+            )
+            if metadata_block:
+                content_list.append(metadata_block)
             write_div = soup.find('div', class_='rd_body clear')
 
             if write_div:

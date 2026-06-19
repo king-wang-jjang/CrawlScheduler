@@ -4,6 +4,7 @@ from typing import Any
 
 
 MEDIA_TYPES = {"image", "video"}
+METADATA_TYPE = "metadata"
 
 
 def text_block(text: object) -> dict[str, str] | None:
@@ -43,6 +44,13 @@ def video_block(
         text=text,
         alt_text=alt_text,
     )
+
+
+def metadata_image_block(image_url: object = None) -> dict[str, str] | None:
+    image_url_value = _clean_text(image_url)
+    if image_url_value is None:
+        return None
+    return {"type": METADATA_TYPE, "image_url": image_url_value}
 
 
 def normalize_contents(contents: object) -> list[dict[str, str]]:
@@ -94,6 +102,11 @@ def normalize_content_block(value: object) -> dict[str, str] | None:
             alt_text=value.get("alt_text") or value.get("alt"),
         )
 
+    if block_type == METADATA_TYPE:
+        return metadata_image_block(
+            value.get("image_url") or value.get("thumbnail") or value.get("url")
+        )
+
     return text_block(_first_text(value, "text", "content", "alt_text", "alt"))
 
 
@@ -105,6 +118,8 @@ def extract_llm_text(title: object, contents: object) -> str:
 
     for block in normalize_contents(contents):
         block_type = block.get("type", "text")
+        if block_type == METADATA_TYPE:
+            continue
         block_text = _clean_text(block.get("text")) or _clean_text(block.get("alt_text"))
         if not block_text:
             continue
@@ -117,10 +132,15 @@ def extract_llm_text(title: object, contents: object) -> str:
 
 
 def first_thumbnail_path(contents: object) -> str | None:
+    metadata_fallback = None
     for block in normalize_contents(contents):
         if block.get("type") == "image":
-            return block.get("media_path") or block.get("path")
-    return None
+            thumbnail = block.get("media_path") or block.get("path")
+            if thumbnail:
+                return thumbnail
+        if block.get("type") == METADATA_TYPE and metadata_fallback is None:
+            metadata_fallback = block.get("image_url")
+    return metadata_fallback
 
 
 def _media_block(

@@ -140,6 +140,40 @@ class AbstractCommunityWebsite(ABC):
 
         return None
 
+    @classmethod
+    def metadata_image_url_from_soup(cls, soup, base_url=None):
+        if not soup:
+            return None
+
+        meta_selectors = [
+            ("property", "og:image"),
+            ("property", "og:image:url"),
+            ("name", "twitter:image"),
+            ("name", "twitter:image:src"),
+            ("itemprop", "image"),
+        ]
+
+        for attr_name, attr_value in meta_selectors:
+            tag = soup.find("meta", attrs={attr_name: attr_value})
+            if not tag:
+                continue
+            image_url = cls.normalize_media_url(tag.get("content"), base_url=base_url)
+            if image_url and not cls._is_placeholder_media_url(image_url):
+                return image_url
+
+        for tag in soup.find_all("link", href=True):
+            rel_values = tag.get("rel") or []
+            if isinstance(rel_values, str):
+                rel_values = [rel_values]
+            normalized_rel_values = {str(value).lower() for value in rel_values}
+            if "image_src" not in normalized_rel_values:
+                continue
+            image_url = cls.normalize_media_url(tag.get("href"), base_url=base_url)
+            if image_url and not cls._is_placeholder_media_url(image_url):
+                return image_url
+
+        return None
+
     @staticmethod
     def normalize_media_url(url, base_url=None):
         if not url:
