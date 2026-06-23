@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import sys
 from pathlib import Path
 
@@ -220,3 +220,101 @@ def test_insert_prefers_local_image_thumbnail_over_metadata_fallback(tmp_path):
     rows = controller.find("Realtime", {"site": "dcinside", "category": "humor", "no": 779})
 
     assert rows[0]["thumbnail"] == "Dcinside/humor/779/image.webp"
+
+
+def test_upsert_records_native_metric_snapshots_and_scores(tmp_path):
+    from crawl_scheduler.db.models import Board, BoardMetricSnapshot
+    from crawl_scheduler.db.postgres import get_session_factory
+    from crawl_scheduler.db.postgres_controller import PostgresController
+
+    controller = PostgresController(database_url=f"sqlite:///{tmp_path / 'crawler.db'}")
+    created_at = datetime(2026, 6, 23, 9, tzinfo=timezone.utc)
+
+    controller.insert_one(
+        "Realtime",
+        {
+            "site": "dcinside",
+            "category": "humor",
+            "no": 900,
+            "title": "metric title",
+            "url": "https://example.com/post/900",
+            "create_time": created_at,
+            "comment_count": 2,
+            "like_count": 1,
+            "source_rank": 8,
+        },
+    )
+    controller.insert_one(
+        "Realtime",
+        {
+            "site": "dcinside",
+            "category": "humor",
+            "no": 900,
+            "title": "metric title",
+            "url": "https://example.com/post/900",
+            "create_time": created_at,
+            "comment_count": 9,
+            "like_count": 5,
+            "source_rank": 2,
+        },
+    )
+
+    rows = controller.find("Realtime", {"site": "dcinside", "category": "humor", "no": 900})
+    with get_session_factory(controller.database_url)() as session:
+        board = session.query(Board).filter_by(source_id="dcinside:humor:900").one()
+        snapshots = (
+            session.query(BoardMetricSnapshot)
+            .filter_by(board_id=board.id)
+            .order_by(BoardMetricSnapshot.captured_at)
+            .all()
+        )
+
+    assert rows[0]["native_comment_count"] == 9
+    assert rows[0]["native_like_count"] == 5
+    assert rows[0]["source_rank"] == 2
+    assert rows[0]["hot_score"] > 0
+    assert rows[0]["daily_score"] > 0
+    assert rows[0]["score_breakdown"]["delta_comments_20m"] == 7
+    assert rows[0]["score_breakdown"]["delta_likes_20m"] == 4
+    assert len(snapshots) == 2
+    assert snapshots[1].comment_count == 9
+
+
+def test_best_lists_order_by_popularity_scores(tmp_path):
+    from crawl_scheduler.db.models import Board
+    from crawl_scheduler.db.postgres import get_session_factory
+    from crawl_scheduler.db.postgres_controller import PostgresController
+
+    controller = PostgresController(database_url=f"sqlite:///{tmp_path / 'crawler.db'}")
+    created_at = datetime(2026, 6, 23, 9, tzinfo=timezone.utc)
+    with get_session_factory(controller.database_url)() as session:
+        session.add_all(
+            [
+                Board(
+                    id="cold-new",
+                    category="humor",
+                    no=1,
+                    site="dcinside",
+                    title="new but cold",
+                    url="https://example.com/1",
+                    created_at=created_at + timedelta(minutes=20),
+                    hot_score=1,
+                    daily_score=1,
+                ),
+                Board(
+                    id="hot-older",
+                    category="humor",
+                    no=2,
+                    site="dcinside",
+                    title="older but hot",
+                    url="https://example.com/2",
+                    created_at=created_at,
+                    hot_score=10,
+                    daily_score=20,
+                ),
+            ]
+        )
+        session.commit()
+
+    assert [row["id"] for row in controller.get_realtime_best(0, 10)] == ["hot-older", "cold-new"]
+    assert [row["id"] for row in controller.get_daily_best(0, 10)] == ["hot-older", "cold-new"]
