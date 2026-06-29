@@ -82,7 +82,7 @@ class Ppomppu(AbstractCommunityWebsite):
                 if not title_element or not create_time_element:
                     continue
 
-                title = title_element.get_text(strip=True)
+                title = self._extract_title(title_element)
                 create_time = create_time_element.get_text(strip=True)
                 url = title_element['href']
 
@@ -113,6 +113,13 @@ class Ppomppu(AbstractCommunityWebsite):
         if not title.startswith("AD"):
             return False
         return True
+
+    @staticmethod
+    def _extract_title(title_element):
+        title_link = title_element.find('a', class_='baseList-title') or title_element
+        for reply_count in title_link.find_all(class_=re.compile(r'\blist_comment')):
+            reply_count.decompose()
+        return title_link.get_text(" ", strip=True)
 
     def get_category_and_no(self, url):
         pattern = r"id=([^&]*)&no=([^&]*)"

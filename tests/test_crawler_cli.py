@@ -98,3 +98,40 @@ def test_dcinside_board_list_preserves_absolute_links(monkeypatch):
     assert rows[0][0] == "http://gall.dcinside.com/list.php?id=dcinterview&no=28987"
     assert rows[0][1] == "dcinterview"
     assert rows[0][2] == "28987"
+
+
+def test_ppomppu_board_list_omits_reply_count_from_title(monkeypatch):
+    from crawl_scheduler.community_website import ppomppu
+
+    class FakeDB:
+        def find(self, *args, **kwargs):
+            return []
+
+    class FakeResponse:
+        text = """
+        <table>
+          <tr class="bbs_new1">
+            <td>
+              <a class="baseList-title" href="/zboard/zboard.php?id=freeboard&no=10013570">
+                <a href="/zboard/zboard.php?id=freeboard&no=10013570" class="baseList-title">
+                  <img src="/images/menu/hot_icon2.jpg" alt="hot" />
+                  actual post title
+                </a>
+                &nbsp;<span class="list_comment2">52</span>
+              </a>
+            </td>
+            <td class="board_date">15:46:12</td>
+          </tr>
+        </table>
+        """
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(ppomppu, "PostgresController", lambda: FakeDB())
+    monkeypatch.setattr(ppomppu.requests, "get", lambda *args, **kwargs: FakeResponse())
+
+    rows = ppomppu.Ppomppu().get_board_list()
+
+    assert len(rows) == 1
+    assert rows[0][4] == "actual post title"
