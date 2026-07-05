@@ -2,7 +2,7 @@ FROM python:3.12.4
 
 WORKDIR /app
 
-RUN pip install poetry
+RUN pip install poetry==2.4.1
 
 RUN apt-get update -y \
     && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 \
@@ -11,7 +11,7 @@ RUN apt-get update -y \
 COPY ./pyproject.toml ./poetry.lock* /app/
 
 RUN poetry cache clear --all pypi
-RUN poetry lock && poetry install --no-root
+RUN poetry install --no-root
 
 COPY . .
 
