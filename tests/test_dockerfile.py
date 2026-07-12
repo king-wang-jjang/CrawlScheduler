@@ -1,8 +1,10 @@
 import re
+import tomllib
 from pathlib import Path
 
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
+WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "crawl.yml"
 
 
 def test_dockerfile_installs_from_committed_poetry_lock():
@@ -13,4 +15,25 @@ def test_dockerfile_installs_from_committed_poetry_lock():
     assert lock_version_match
     assert f"poetry=={lock_version_match.group(1)}" in dockerfile
     assert "poetry lock" not in dockerfile
-    assert "poetry install --no-root" in dockerfile
+    assert "poetry install --only main --no-root" in dockerfile
+
+
+def test_github_action_builds_crawler_for_arm_server():
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert "docker/setup-qemu-action@v3" in workflow
+    assert "linux/arm64" in workflow
+
+
+def test_paddle_ocr_dependencies_are_optional_for_arm_runtime_image():
+    pyproject = tomllib.loads((SERVICE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    main_dependencies = pyproject["tool"]["poetry"]["dependencies"]
+    ocr_group = pyproject["tool"]["poetry"]["group"]["ocr"]
+    ocr_dependencies = ocr_group["dependencies"]
+
+    assert ocr_group["optional"] is True
+    assert "paddleocr" not in main_dependencies
+    assert "paddlepaddle" not in main_dependencies
+    assert "paddleocr" in ocr_dependencies
+    assert "paddlepaddle" in ocr_dependencies

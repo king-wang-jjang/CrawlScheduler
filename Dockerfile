@@ -11,7 +11,7 @@ RUN apt-get update -y \
 COPY ./pyproject.toml ./poetry.lock* /app/
 
 RUN poetry cache clear --all pypi
-RUN poetry install --no-root
+RUN poetry install --only main --no-root
 
 COPY . .
 
