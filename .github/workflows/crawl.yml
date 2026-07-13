@@ -100,6 +100,8 @@ jobs:
           echo "DATABASE_URL=${DATABASE_URL}" >> .env
           echo "DOCKER_DATABASE_URL=${DOCKER_DATABASE_URL}" >> .env
           echo "SERVER_RUN_MODE=${SERVER_RUN_MODE:-TRUE}" >> .env
+          echo "ROOT=/app/public" >> .env
+          echo "CRAWLER_MEDIA_HOST_ROOT=/mnt/kingwangjjang" >> .env
           echo "CHATGPT_API_KEY=${{ secrets.CHATGPT_API_KEY }}" >> .env
           echo "FTP_HOST=${{ secrets.FTP_HOST }}" >> .env
           echo "FTP_USERNAME=${{ secrets.FTP_USERNAME }}" >> .env
@@ -134,8 +136,19 @@ jobs:
           key: ${{secrets.SSH_KEY}}
           port: ${{ secrets.WAS_SSH_PORT }}
           script: | # 인스턴스 접속후 실행할 스크립트
+            set -eu
             sudo docker version
             cd kingwangjjang/crawl
+
+            # ROOT was omitted from deploys after 2026-04-30, so the running
+            # crawler may contain recoverable media in its unmounted /app/media.
+            # Copy it into the shared host directory before removing the container.
+            CRAWLER_CONTAINER_ID="$(sudo docker-compose ps -q kingwangjjang-crawl 2>/dev/null || true)"
+            if [ -n "$CRAWLER_CONTAINER_ID" ] && sudo docker exec "$CRAWLER_CONTAINER_ID" test -d /app/media; then
+              sudo mkdir -p /mnt/kingwangjjang
+              sudo docker cp "${CRAWLER_CONTAINER_ID}:/app/media/." /mnt/kingwangjjang/
+            fi
+
             sudo docker-compose down
             sudo docker rmi ${{ secrets.DOCKERHUB_USERNAME }}/crawl_scheduler:0.0.1 -f || true
             sudo docker-compose up -d

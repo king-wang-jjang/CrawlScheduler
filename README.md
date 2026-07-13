@@ -70,6 +70,12 @@ crawl_scheduler/
 
 컨테이너 실행 시에는 `DOCKER_DATABASE_URL`이 `DATABASE_URL`로 주입됩니다. 로컬에서 직접 실행할 때는 `DATABASE_URL`을 설정하면 됩니다.
 
+컨테이너에서 수집한 미디어는 `CRAWLER_MEDIA_HOST_ROOT`(기본값
+`/mnt/kingwangjjang`)에 저장됩니다. 크롤러의 `/app/public`과 API 서버의
+`/app/public`이 같은 호스트 디렉터리를 마운트해야 DB에 저장된 상대 경로를
+이미지 서버에서 제공할 수 있습니다. 로컬 직접 실행에서는 기존처럼
+`ROOT=./media`를 사용합니다.
+
 
 ## 기여
 기여를 원하시는 분은 이 저장소를 포크한 후, 변경 사항을 제안해 주세요. 

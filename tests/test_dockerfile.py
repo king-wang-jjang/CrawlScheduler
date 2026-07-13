@@ -5,6 +5,7 @@ from pathlib import Path
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "crawl.yml"
+COMPOSE_PATH = SERVICE_ROOT / "docker-compose.yml"
 
 
 def test_dockerfile_installs_from_committed_poetry_lock():
@@ -37,3 +38,24 @@ def test_paddle_ocr_dependencies_are_optional_for_arm_runtime_image():
     assert "paddlepaddle" not in main_dependencies
     assert "paddleocr" in ocr_dependencies
     assert "paddlepaddle" in ocr_dependencies
+
+
+def test_crawler_writes_media_to_the_shared_container_directory():
+    compose = COMPOSE_PATH.read_text(encoding="utf-8")
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert "ROOT: /app/public" in compose
+    assert (
+        "${CRAWLER_MEDIA_HOST_ROOT:-/mnt/kingwangjjang}:/app/public" in compose
+    )
+    assert 'echo "ROOT=/app/public" >> .env' in workflow
+
+
+def test_deploy_recovers_media_before_removing_the_old_container():
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    recovery = 'docker cp "${CRAWLER_CONTAINER_ID}:/app/media/."'
+    teardown = "sudo docker-compose down"
+
+    assert recovery in workflow
+    assert workflow.index(recovery) < workflow.index(teardown)

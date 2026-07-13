@@ -6,6 +6,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 
 from crawl_scheduler.config import Config
+from crawl_scheduler.crawled_content import is_usable_thumbnail_url
 from crawl_scheduler.ocr import extract_text_from_image
 from crawl_scheduler.utils.loghandler import logger
 
@@ -158,7 +159,7 @@ class AbstractCommunityWebsite(ABC):
             if not tag:
                 continue
             image_url = cls.normalize_media_url(tag.get("content"), base_url=base_url)
-            if image_url and not cls._is_placeholder_media_url(image_url):
+            if cls._is_metadata_image_url(image_url):
                 return image_url
 
         for tag in soup.find_all("link", href=True):
@@ -169,7 +170,7 @@ class AbstractCommunityWebsite(ABC):
             if "image_src" not in normalized_rel_values:
                 continue
             image_url = cls.normalize_media_url(tag.get("href"), base_url=base_url)
-            if image_url and not cls._is_placeholder_media_url(image_url):
+            if cls._is_metadata_image_url(image_url):
                 return image_url
 
         return None
@@ -209,9 +210,15 @@ class AbstractCommunityWebsite(ABC):
         basename = os.path.basename(parsed_url.path).lower()
         return basename in {
             "blank.gif",
+            "cdn_img_404.jpg",
             "loading.gif",
             "gallview_loading_ori.gif",
+            "icon_app_20160427.png",
         }
+
+    @classmethod
+    def _is_metadata_image_url(cls, url):
+        return is_usable_thumbnail_url(url)
 
     @staticmethod
     def _safe_file_name(file_name):

@@ -216,3 +216,39 @@ def test_metadata_image_url_from_soup_supports_image_src_link():
         )
         == "https://example.com/images/post.jpg"
     )
+
+
+def test_metadata_image_url_skips_video_and_uses_later_image_candidate():
+    import crawl_scheduler.community_website.community_website as community_website
+
+    soup = BeautifulSoup(
+        '<html><head>'
+        '<meta property="og:image" content="https://cdn.example.com/post.mp4">'
+        '<meta name="twitter:image" content="https://cdn.example.com/post.jpg">'
+        '</head></html>',
+        "html.parser",
+    )
+
+    assert (
+        community_website.AbstractCommunityWebsite.metadata_image_url_from_soup(soup)
+        == "https://cdn.example.com/post.jpg"
+    )
+
+
+def test_metadata_image_url_rejects_known_placeholder_images():
+    import crawl_scheduler.community_website.community_website as community_website
+
+    soup = BeautifulSoup(
+        '<html><head>'
+        '<meta property="og:image" '
+        'content="https://cdn2.ppomppu.co.kr/images/icon_app_20160427.png">'
+        '<meta name="twitter:image" '
+        'content="https://cdn3.ppomppu.co.kr/cdn_img_404.jpg">'
+        '</head></html>',
+        "html.parser",
+    )
+
+    assert (
+        community_website.AbstractCommunityWebsite.metadata_image_url_from_soup(soup)
+        is None
+    )

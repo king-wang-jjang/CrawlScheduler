@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 
 MEDIA_TYPES = {"image", "video"}
 METADATA_TYPE = "metadata"
+UNUSABLE_THUMBNAIL_NAMES = {
+    "blank.gif",
+    "cdn_img_404.jpg",
+    "gallview_loading_ori.gif",
+    "icon_app_20160427.png",
+    "loading.gif",
+}
+VIDEO_THUMBNAIL_EXTENSIONS = {".m3u8", ".m4v", ".mov", ".mp4", ".webm"}
 
 
 def text_block(text: object) -> dict[str, str] | None:
@@ -48,9 +57,22 @@ def video_block(
 
 def metadata_image_block(image_url: object = None) -> dict[str, str] | None:
     image_url_value = _clean_text(image_url)
-    if image_url_value is None:
+    if not is_usable_thumbnail_url(image_url_value):
         return None
     return {"type": METADATA_TYPE, "image_url": image_url_value}
+
+
+def is_usable_thumbnail_url(image_url: object = None) -> bool:
+    image_url_value = _clean_text(image_url)
+    if image_url_value is None:
+        return False
+
+    path = urlparse(image_url_value).path.lower()
+    basename = path.rstrip("/").rsplit("/", 1)[-1]
+    if basename in UNUSABLE_THUMBNAIL_NAMES:
+        return False
+
+    return not any(path.endswith(extension) for extension in VIDEO_THUMBNAIL_EXTENSIONS)
 
 
 def normalize_contents(contents: object) -> list[dict[str, str]]:

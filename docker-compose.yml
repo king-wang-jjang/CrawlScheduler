@@ -7,8 +7,12 @@ services:
       - .env
     environment:
       DATABASE_URL: ${DOCKER_DATABASE_URL:?DOCKER_DATABASE_URL is required}
+      # The API/image server reads this same host directory via /app/public.
+      # Override the local-development ROOT=./media value from .env so files
+      # survive crawler container replacement and are visible to the server.
+      ROOT: /app/public
     volumes:
-      - /mnt/kingwangjjang:/app/public
+      - ${CRAWLER_MEDIA_HOST_ROOT:-/mnt/kingwangjjang}:/app/public
     networks:
       - kingwangjjang-network
 
