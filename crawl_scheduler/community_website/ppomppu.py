@@ -1,11 +1,13 @@
 import re
 from bs4 import BeautifulSoup
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from crawl_scheduler.config import Config
 from crawl_scheduler.crawled_content import image_block, metadata_image_block, text_block, video_block
 from crawl_scheduler.db.postgres_controller import PostgresController
 from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
+from crawl_scheduler.community_website.board_list_entry import BoardListEntry, parse_native_count, recent_source_datetime
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_PPOMPPU, DEFAULT_TAG
 import os
 from crawl_scheduler.utils.loghandler import logger
@@ -21,49 +23,79 @@ class Ppomppu(AbstractCommunityWebsite):
     def get_realtime_best(self, category=None, no=None):
         domain = "https://ppomppu.co.kr"
         already_exists_post = []
-        board_list = self.get_board_list()
+        board_entries = self.get_board_entries()
         
         if category and no:
             self.debugging_mode = True
             url = f"/zboard/view.php?id={category}&no={no}"
-            target_datetime = datetime.now()
-            title = "Debbugging Mode"
-            board_list = [(url, category, no, target_datetime, title)]
+            board_entries = [
+                BoardListEntry(
+                    url=url,
+                    category=category,
+                    no=int(no),
+                    title="Debbugging Mode",
+                    created_at=datetime.now(ZoneInfo('Asia/Seoul')),
+                    native_comment_count=None,
+                    native_like_count=None,
+                    native_view_count=None,
+                    source_rank=None,
+                )
+            ]
 
-        for url, category, no, target_datetime, title in board_list: 
+        for entry in board_entries:
             try:
-                if self._post_already_exists(category, no) and self.debugging_mode == False:
-                    already_exists_post.append((category, no))
+                query = {
+                    'site': SITE_PPOMPPU,
+                    'category': entry.category,
+                    'no': int(entry.no),
+                }
+                if self._post_already_exists(entry.category, entry.no) and self.debugging_mode == False:
+                    self.db_controller.refresh_native_metrics(
+                        'Realtime', query, entry.metrics_dict()
+                    )
+                    already_exists_post.append((entry.category, entry.no))
                     continue
                 
                 # if category == "freeboard":
                 #     logger.warn("Freeboard ========================================")
                     
-                gpt_obj_id = self.get_gpt_obj((category, no))
-                contents = self.get_board_contents(url=domain+url, category=category, no=no)
+                gpt_obj_id = self.get_gpt_obj((entry.category, entry.no))
+                contents = self.get_board_contents(
+                    url=domain + entry.url,
+                    category=entry.category,
+                    no=entry.no,
+                )
 
-                self.db_controller.insert_one('Realtime', {
+                document = {
                     'site': SITE_PPOMPPU,
-                    'category': category,
-                    'no': int(no),
-                    'title': title,
-                    'url': domain + url,
-                    'create_time': target_datetime,
+                    'category': entry.category,
+                    'no': int(entry.no),
+                    'title': entry.title,
+                    'url': domain + entry.url,
+                    'create_time': entry.created_at,
                     'gpt_answer': gpt_obj_id,
-                    'contents': contents
-                })
-                logger.info(f"Post {(category, no)} inserted successfully")
+                    'contents': contents,
+                    **entry.metrics_dict(),
+                }
+                self.db_controller.insert_one('Realtime', document)
+                logger.info(f"Post {(entry.category, entry.no)} inserted successfully")
             except Exception as e:
-                logger.error(f"Error Save To DB {category, no}: {e}")
+                logger.error(f"Error Save To DB {entry.category, entry.no}: {e}")
 
         logger.info({"already exists post": already_exists_post})
         return True
 
     def get_board_list(self):
         """ 게시판에서 URL, 카테고리, 게시글 번호, 생성 시간, 제목 추출 """
+        return [
+            (entry.url, entry.category, entry.no, entry.created_at, entry.title)
+            for entry in self.get_board_entries()
+        ]
+
+    def get_board_entries(self):
         url = "https://www.ppomppu.co.kr/hot.php?id=&page=1&category=999"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
-        now = datetime.now()
+        now = datetime.now(ZoneInfo('Asia/Seoul'))
         try:
             response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
@@ -73,15 +105,23 @@ class Ppomppu(AbstractCommunityWebsite):
             return []
 
         board_list = []
+        metrics_crawled_at = datetime.now(timezone.utc)
 
         for tr in soup.find_all('tr', class_='bbs_new1'):
             try:
                 title_element = tr.find('a', class_='baseList-title')
-                create_time_element = tr.find('td', class_='board_date')
+                metric_cells = tr.select('td.board_date')
+                create_time_element = metric_cells[0] if metric_cells else None
 
                 if not title_element or not create_time_element:
                     continue
 
+                reply_element = tr.find(class_=re.compile(r'\blist_comment'))
+                native_comment_count = (
+                    parse_native_count(reply_element)
+                    if reply_element is not None
+                    else 0
+                )
                 title = self._extract_title(title_element)
                 create_time = create_time_element.get_text(strip=True)
                 url = title_element['href']
@@ -90,7 +130,10 @@ class Ppomppu(AbstractCommunityWebsite):
                 if self.is_ad(title=title):
                     continue
 
-                category, no = self.get_category_and_no(url)
+                category = tr.get('data-bbs_id')
+                no = tr.get('data-bbs_no')
+                if not category or not no:
+                    category, no = self.get_category_and_no(url)
                 url = f"/zboard/view.php?id={category}&no={no}"
                 no = int(no)
 
@@ -99,10 +142,35 @@ class Ppomppu(AbstractCommunityWebsite):
                     break
 
                 hour, minute, second = map(int, create_time.split(":"))
-                target_datetime = datetime(now.year, now.month, now.day, hour, minute)
+                target_datetime = recent_source_datetime(
+                    hour,
+                    minute,
+                    second,
+                    now=now,
+                )
 
-                # ✅ 튜플로 반환
-                board_list.append((url, category, no, target_datetime, title))
+                board_list.append(
+                    BoardListEntry(
+                        url=url,
+                        category=category,
+                        no=no,
+                        title=title,
+                        created_at=target_datetime,
+                        native_comment_count=native_comment_count,
+                        native_like_count=(
+                            parse_native_count(metric_cells[1])
+                            if len(metric_cells) > 1
+                            else None
+                        ),
+                        native_view_count=(
+                            parse_native_count(metric_cells[2])
+                            if len(metric_cells) > 2
+                            else None
+                        ),
+                        source_rank=len(board_list) + 1,
+                        metrics_crawled_at=metrics_crawled_at,
+                    )
+                )
 
             except Exception as e:
                 logger.error(f"Error parsing post: {e}")
@@ -135,7 +203,7 @@ class Ppomppu(AbstractCommunityWebsite):
         content_list = []
         if url:
             try:
-                response = requests.get(url, headers=headers)
+                response = requests.get(url, headers=headers, timeout=10)
                 response.raise_for_status()
                 soup = BeautifulSoup(response.text, 'lxml')
                 metadata_block = metadata_image_block(

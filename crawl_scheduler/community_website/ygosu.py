@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 from typing import Tuple
 from bs4 import BeautifulSoup
@@ -7,6 +7,7 @@ from crawl_scheduler.config import Config
 from crawl_scheduler.crawled_content import image_block, metadata_image_block, text_block, video_block
 from crawl_scheduler.db.postgres_controller import PostgresController
 from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
+from crawl_scheduler.community_website.board_list_entry import BoardListEntry, parse_native_count, recent_source_datetime
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_YGOSU, DEFAULT_TAG
 from crawl_scheduler.utils.loghandler import logger
 import sys
@@ -72,28 +73,40 @@ class Ygosu(AbstractCommunityWebsite):
 
     def get_realtime_best(self):
         already_exists_post = []
-        board_list = self.get_board_list()  # 🔹 분리한 함수 호출
-        for url, target_datetime, category, no, title in board_list:
+        board_entries = self.get_board_entries()
+        for entry in board_entries:
             try:
-                if self._post_already_exists(category, no, 'Realtime'):
-                    already_exists_post.append((category, no))
+                query = {
+                    'site': SITE_YGOSU,
+                    'category': entry.category,
+                    'no': int(entry.no),
+                }
+                if self._post_already_exists(entry.category, entry.no, 'Realtime'):
+                    self.db_controller.refresh_native_metrics(
+                        'Realtime', query, entry.metrics_dict()
+                    )
+                    already_exists_post.append((entry.category, entry.no))
                     continue
 
-                gpt_obj_id = self.get_gpt_obj((category, no))
-                contents = self.get_board_contents(url=url, category=category, no=no)
-                self.db_controller.insert_one('Realtime', {
+                gpt_obj_id = self.get_gpt_obj((entry.category, entry.no))
+                contents = self.get_board_contents(
+                    url=entry.url, category=entry.category, no=entry.no
+                )
+                document = {
                     'site': SITE_YGOSU,
-                    'category': category,
-                    'no': int(no),
-                    'title': title,
-                    'url': url,
-                    'create_time': target_datetime,
+                    'category': entry.category,
+                    'no': int(entry.no),
+                    'title': entry.title,
+                    'url': entry.url,
+                    'create_time': entry.created_at,
                     'gpt_answer': gpt_obj_id,
-                    'contents': contents
-                })
-                logger.info(f"Inserted Success: {(category, no)} ")
+                    'contents': contents,
+                    **entry.metrics_dict(),
+                }
+                self.db_controller.insert_one('Realtime', document)
+                logger.info(f"Inserted Success: {(entry.category, entry.no)} ")
             except Exception as e:
-                logger.error(f"Error Save To DB {category, no}: {e}")
+                logger.error(f"Error Save To DB {entry.category, entry.no}: {e}")
                 return False
 
         logger.info({"already exists post": already_exists_post})
@@ -104,7 +117,7 @@ class Ygosu(AbstractCommunityWebsite):
         content_list = []
         if url:
             try:
-                response = requests.get(url)
+                response = requests.get(url, timeout=10)
                 response.raise_for_status()
                 soup = BeautifulSoup(response.content, 'html.parser')
                 metadata_block = metadata_image_block(
@@ -173,15 +186,22 @@ class Ygosu(AbstractCommunityWebsite):
     
     def get_board_list(self):
         """ 게시판에서 URL, 날짜, 카테고리, 게시글 번호, 제목 추출 """
+        return [
+            (entry.url, entry.created_at, entry.category, entry.no, entry.title)
+            for entry in self.get_board_entries()
+        ]
+
+    def get_board_entries(self):
         board_list = []
         try:
-            req = requests.get('https://ygosu.com/board/real_article')
+            req = requests.get('https://ygosu.com/board/real_article', timeout=10)
             req.raise_for_status()
             soup = BeautifulSoup(req.text, 'html.parser')
         except Exception as e:
             logger.error(f"Get List Error: {e}")
             return []
 
+        metrics_crawled_at = datetime.now(timezone.utc)
         for tr in soup.find_all('tr'):
             tit_element = tr.select_one('.tit a')
             create_time_element = tr.select_one('.date')
@@ -194,12 +214,29 @@ class Ygosu(AbstractCommunityWebsite):
                     continue
 
                 url = tit_element['href']
-                now = datetime.now()
                 hour, minute = map(int, create_time.split(':'))
-                target_datetime = datetime(now.year, now.month, now.day, hour, minute)
+                target_datetime = recent_source_datetime(hour, minute)
 
                 category, no = self.get_category_and_no(url)
-                board_list.append((url, target_datetime, category, no, title))
+                reply_element = tr.select_one('.reply_cnt')
+                board_list.append(
+                    BoardListEntry(
+                        url=url,
+                        category=category,
+                        no=no,
+                        title=title,
+                        created_at=target_datetime,
+                        native_comment_count=(
+                            parse_native_count(reply_element)
+                            if reply_element is not None
+                            else 0
+                        ),
+                        native_like_count=parse_native_count(tr.select_one('.vote')),
+                        native_view_count=parse_native_count(tr.select_one('.read')),
+                        source_rank=len(board_list) + 1,
+                        metrics_crawled_at=metrics_crawled_at,
+                    )
+                )
 
         return board_list
             

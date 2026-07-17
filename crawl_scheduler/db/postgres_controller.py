@@ -1,9 +1,10 @@
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
+from math import exp, isfinite
 from uuid import uuid4
 
-from sqlalchemy import desc, inspect, nullslast, select, text
+from sqlalchemy import delete, desc, func, inspect, select, text
 
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, DEFAULT_TAG
 from crawl_scheduler.crawled_content import (
@@ -13,11 +14,18 @@ from crawl_scheduler.crawled_content import (
 )
 from crawl_scheduler.db.models import Board, BoardMetricSnapshot, CrawlerLog
 from crawl_scheduler.db.postgres import Base, get_engine, get_session_factory
-from crawl_scheduler.popularity import PopularityMetrics, calculate_popularity_scores
+from crawl_scheduler.popularity import (
+    DAILY_DECAY_HOURS,
+    HOT_DECAY_HOURS,
+    PopularityMetrics,
+    calculate_popularity_scores,
+)
 from crawl_scheduler.utils.llm import LLM
 
 
 BOARD_COLLECTIONS = {"realtime", "daily"}
+SNAPSHOT_RETENTION_DAYS = 7
+SNAPSHOT_CLEANUP_INTERVAL = timedelta(hours=1)
 
 
 @dataclass(frozen=True)
@@ -40,6 +48,7 @@ class PostgresController:
     def __init__(self, database_url: str | None = None, analyzer: LLM | None = None):
         self.database_url = database_url
         self.analyzer = analyzer or LLM()
+        self._last_snapshot_cleanup_at: datetime | None = None
         engine = get_engine(database_url)
         Base.metadata.create_all(bind=engine)
         self._ensure_board_columns(engine)
@@ -67,6 +76,53 @@ class PostgresController:
         if collection == "log":
             return self._insert_log(document)
         return InsertOneResult(str(uuid4()))
+
+    def refresh_native_metrics(
+        self,
+        collection_name: str,
+        query: dict,
+        metrics: dict,
+    ) -> dict | None:
+        """Update only source metrics and ranking scores for an existing board.
+
+        Crawlers use this path for posts that are still visible in a source site's
+        popular feed.  It intentionally leaves title, body, analysis and local
+        reaction counts untouched.
+        """
+        if collection_name.lower() not in BOARD_COLLECTIONS:
+            return None
+
+        with get_session_factory(self.database_url)() as session:
+            board = session.scalars(self._apply_board_query(select(Board), query)).first()
+            if board is None:
+                return None
+
+            metric_document = {
+                key: metrics.get(key)
+                for key in (
+                    "native_comment_count",
+                    "native_like_count",
+                    "native_view_count",
+                    "source_rank",
+                    "metrics_crawled_at",
+                )
+                if key in metrics
+            }
+            previous_metric_values = {
+                "native_comment_count": board.native_comment_count,
+                "native_like_count": board.native_like_count,
+                "native_view_count": board.native_view_count,
+                "source_rank": board.source_rank,
+            }
+            for key, previous_value in previous_metric_values.items():
+                if metric_document.get(key) is None and previous_value is not None:
+                    metric_document[key] = previous_value
+            self._record_metric_snapshot(session, board, metric_document)
+            if "next_metrics_crawl_at" in metrics:
+                board.next_metrics_crawl_at = metrics.get("next_metrics_crawl_at")
+            session.commit()
+            session.refresh(board)
+            return self._board_to_document(board)
 
     def update_one(self, collection_name: str, query: dict, update: dict) -> UpdateResult:
         collection = collection_name.lower()
@@ -137,6 +193,16 @@ class PostgresController:
             existing_board,
             summary,
         )
+        llm_engagement_score = self._optional_score(
+            document["llm_engagement_score"]
+            if "llm_engagement_score" in document
+            else getattr(existing_board, "llm_engagement_score", None)
+        )
+        llm_engagement_reason = self._optional_reason(
+            document["llm_engagement_reason"]
+            if "llm_engagement_reason" in document
+            else getattr(existing_board, "llm_engagement_reason", None)
+        )
         return {
             "source_id": self._source_id(site, category, no, document),
             "category": category,
@@ -147,6 +213,8 @@ class PostgresController:
             "contents": self._json_safe(contents),
             "gpt_answer": summary,
             "tags": tags,
+            "llm_engagement_score": llm_engagement_score,
+            "llm_engagement_reason": llm_engagement_reason,
             "analysis_status": analysis_status,
             "analysis_priority": int(document.get("analysis_priority") or getattr(existing_board, "analysis_priority", 0) or 0),
             "analysis_requested_at": document.get("analysis_requested_at") or getattr(existing_board, "analysis_requested_at", None),
@@ -235,8 +303,9 @@ class PostgresController:
 
     def _list_boards(self, index: int, limit: int, daily: bool) -> list[dict]:
         offset = max(index, 0) * max(limit, 1)
-        ordering = nullslast(desc(Board.daily_score)) if daily else nullslast(desc(Board.hot_score))
+        ordering = desc(self._effective_score_expression(daily=daily))
         secondary_ordering = desc(Board.like_count) if daily else desc(Board.created_at)
+        score_as_of = datetime.now(timezone.utc)
         with get_session_factory(self.database_url)() as session:
             boards = session.scalars(
                 select(Board)
@@ -244,7 +313,27 @@ class PostgresController:
                 .offset(offset)
                 .limit(limit)
             ).all()
-            return [self._board_to_document(board) for board in boards]
+            return [
+                self._board_to_document(board, score_as_of=score_as_of)
+                for board in boards
+            ]
+
+    def _effective_score_expression(self, *, daily: bool):
+        score_column = Board.daily_score if daily else Board.hot_score
+        decay_hours = DAILY_DECAY_HOURS if daily else HOT_DECAY_HOURS
+        updated_at = func.coalesce(Board.score_updated_at, Board.created_at)
+        engine = get_engine(self.database_url)
+        if engine.dialect.name == "postgresql":
+            elapsed_hours = func.greatest(
+                func.extract("epoch", func.current_timestamp() - updated_at) / 3600.0,
+                0.0,
+            )
+        else:
+            elapsed_hours = func.max(
+                (func.julianday(func.current_timestamp()) - func.julianday(updated_at)) * 24.0,
+                0.0,
+            )
+        return func.coalesce(score_column, 0.0) * func.exp(-elapsed_hours / decay_hours)
 
     def _insert_log(self, document: dict) -> InsertOneResult:
         payload = self._json_safe(document)
@@ -269,7 +358,27 @@ class PostgresController:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE boards ALTER COLUMN no TYPE BIGINT"))
 
-    def _board_to_document(self, board: Board) -> dict:
+    def _board_to_document(
+        self,
+        board: Board,
+        score_as_of: datetime | None = None,
+    ) -> dict:
+        hot_score = board.hot_score
+        daily_score = board.daily_score
+        if score_as_of is not None:
+            updated_at = board.score_updated_at or board.created_at
+            hot_score = self._effective_score_value(
+                hot_score,
+                updated_at,
+                score_as_of,
+                HOT_DECAY_HOURS,
+            )
+            daily_score = self._effective_score_value(
+                daily_score,
+                updated_at,
+                score_as_of,
+                DAILY_DECAY_HOURS,
+            )
         return {
             "_id": board.id,
             "id": board.id,
@@ -282,6 +391,8 @@ class PostgresController:
             "contents": board.contents,
             "gpt_answer": board.gpt_answer,
             "tags": board.tags or [],
+            "llm_engagement_score": board.llm_engagement_score,
+            "llm_engagement_reason": board.llm_engagement_reason,
             "analysis_status": board.analysis_status,
             "analysis_priority": int(board.analysis_priority or 0),
             "analysis_retry_count": int(board.analysis_retry_count or 0),
@@ -297,12 +408,26 @@ class PostgresController:
             "native_like_count": board.native_like_count,
             "native_view_count": board.native_view_count,
             "source_rank": board.source_rank,
-            "hot_score": board.hot_score,
-            "daily_score": board.daily_score,
+            "hot_score": hot_score,
+            "daily_score": daily_score,
             "score_breakdown": board.score_breakdown or {},
             "metrics_crawled_at": board.metrics_crawled_at,
             "score_updated_at": board.score_updated_at,
         }
+
+    @staticmethod
+    def _effective_score_value(
+        score: float | None,
+        updated_at: datetime,
+        as_of: datetime,
+        decay_hours: float,
+    ) -> float:
+        if updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=timezone.utc)
+        if as_of.tzinfo is None:
+            as_of = as_of.replace(tzinfo=timezone.utc)
+        elapsed_hours = max((as_of - updated_at).total_seconds() / 3600, 0.0)
+        return float(score or 0.0) * exp(-elapsed_hours / decay_hours)
 
     @staticmethod
     def _board_attr_name(key: str) -> str:
@@ -374,6 +499,8 @@ class PostgresController:
         existing_columns = {column["name"] for column in inspector.get_columns("boards")}
         column_definitions = {
             "tags": "JSON",
+            "llm_engagement_score": "INTEGER",
+            "llm_engagement_reason": "TEXT",
             "analysis_status": "VARCHAR(32) NOT NULL DEFAULT 'pending'",
             "analysis_priority": "INTEGER NOT NULL DEFAULT 0",
             "analysis_requested_at": "TIMESTAMP",
@@ -397,12 +524,48 @@ class PostgresController:
             for column_name, definition in column_definitions.items()
             if column_name not in existing_columns
         }
-        if not missing_columns:
+        existing_index_names = {
+            index["name"]
+            for index in inspector.get_indexes("board_metric_snapshots")
+        }
+        index_definitions = {
+            "ix_board_metric_snapshots_board_captured_at": (
+                "ON board_metric_snapshots (board_id, captured_at)"
+            ),
+            "ix_board_metric_snapshots_captured_at": (
+                "ON board_metric_snapshots (captured_at)"
+            ),
+        }
+        missing_indexes = {
+            name: definition
+            for name, definition in index_definitions.items()
+            if name not in existing_index_names
+        }
+        if not missing_columns and not missing_indexes:
             return
 
         with engine.begin() as connection:
             for column_name, definition in missing_columns.items():
-                connection.execute(text(f"ALTER TABLE boards ADD COLUMN {column_name} {definition}"))
+                if_not_exists = "IF NOT EXISTS " if engine.dialect.name == "postgresql" else ""
+                connection.execute(
+                    text(
+                        f"ALTER TABLE boards ADD COLUMN {if_not_exists}{column_name} {definition}"
+                    )
+                )
+            for index_name, definition in missing_indexes.items():
+                connection.execute(
+                    text(f"CREATE INDEX IF NOT EXISTS {index_name} {definition}")
+                )
+            if "llm_engagement_score" in missing_columns:
+                connection.execute(
+                    text(
+                        "UPDATE boards SET analysis_status = 'pending', "
+                        "analysis_retry_count = 0 "
+                        "WHERE llm_engagement_score IS NULL "
+                        "AND gpt_answer IS NOT NULL AND gpt_answer <> :default_answer"
+                    ),
+                    {"default_answer": DEFAULT_GPT_ANSWER},
+                )
 
     @staticmethod
     def _source_token(value: object) -> str:
@@ -427,6 +590,25 @@ class PostgresController:
             return max(int(value), 0)
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _optional_score(value: object) -> int | None:
+        if value is None or value == "":
+            return None
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not isfinite(numeric_value):
+            return None
+        return max(0, min(int(round(numeric_value)), 100))
+
+    @staticmethod
+    def _optional_reason(value: object) -> str | None:
+        if not isinstance(value, str):
+            return None
+        reason = value.strip()
+        return reason[:240] or None
 
     @staticmethod
     def _coerce_text(value: object) -> str | None:
@@ -465,6 +647,17 @@ class PostgresController:
         if captured_at.tzinfo is None:
             captured_at = captured_at.replace(tzinfo=timezone.utc)
 
+        if (
+            self._last_snapshot_cleanup_at is None
+            or captured_at - self._last_snapshot_cleanup_at >= SNAPSHOT_CLEANUP_INTERVAL
+        ):
+            session.execute(
+                delete(BoardMetricSnapshot).where(
+                    BoardMetricSnapshot.captured_at
+                    < captured_at - timedelta(days=SNAPSHOT_RETENTION_DAYS),
+                )
+            )
+            self._last_snapshot_cleanup_at = captured_at
         previous_snapshots = session.scalars(
             select(BoardMetricSnapshot)
             .where(BoardMetricSnapshot.board_id == board.id)
@@ -482,9 +675,11 @@ class PostgresController:
                 like_count=like_count or 0,
                 view_count=view_count,
                 source_rank=source_rank,
+                llm_engagement_score=board.llm_engagement_score,
                 previous_comment_count=getattr(previous_snapshot, "comment_count", None),
                 previous_like_count=getattr(previous_snapshot, "like_count", None),
                 previous_view_count=getattr(previous_snapshot, "view_count", None),
+                previous_captured_at=getattr(previous_snapshot, "captured_at", None),
                 previous_delta_comments=self._snapshot_delta(
                     previous_snapshot,
                     previous_previous_snapshot,
@@ -499,6 +694,10 @@ class PostgresController:
                     previous_snapshot,
                     previous_previous_snapshot,
                     "view_count",
+                ),
+                previous_interval_minutes=self._snapshot_interval_minutes(
+                    previous_snapshot,
+                    previous_previous_snapshot,
                 ),
             )
         )
@@ -534,3 +733,15 @@ class PostgresController:
         current_value = getattr(current, attr) or 0
         previous_value = getattr(previous, attr) or 0
         return max(int(current_value) - int(previous_value), 0)
+
+    @staticmethod
+    def _snapshot_interval_minutes(
+        current: BoardMetricSnapshot | None,
+        previous: BoardMetricSnapshot | None,
+    ) -> float | None:
+        if current is None or previous is None:
+            return None
+        elapsed_seconds = (current.captured_at - previous.captured_at).total_seconds()
+        if elapsed_seconds <= 0:
+            return None
+        return elapsed_seconds / 60

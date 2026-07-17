@@ -1,12 +1,13 @@
 import re
 from bs4 import BeautifulSoup
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
 from crawl_scheduler.config import Config
 from crawl_scheduler.crawled_content import image_block, metadata_image_block, text_block, video_block
 from crawl_scheduler.db.postgres_controller import PostgresController
 from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
+from crawl_scheduler.community_website.board_list_entry import BoardListEntry, parse_native_count, recent_source_datetime
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_THEQOO, DEFAULT_TAG
 import os
 from crawl_scheduler.utils.loghandler import logger
@@ -26,30 +27,41 @@ class Theqoo(AbstractCommunityWebsite):
     def get_realtime_best(self):
         category = 'hot'  # theqoo는 카테고리를 hot으로 단일 고정 (20250214)
         already_exists_post = []
-        board_list = self.get_board_list()  # 🔹 분리한 함수 호출
+        board_entries = self.get_board_entries()
 
-        for url, no, target_datetime, title in board_list:  # ✅ 튜플 언패킹 활용
+        for entry in board_entries:
             try:
                 # Check if post already exists in DB
-                if self._post_already_exists(('hot', no), already_exists_post):
-                    already_exists_post.append((category, no))
-                    continue
-
-                gpt_obj_id = self.get_gpt_obj(no)
-                contents = self.get_board_contents(url=url, category=category, no=no)
-                self.db_controller.insert_one('Realtime', {
+                query = {
                     'site': SITE_THEQOO,
                     'category': category,
-                    'no': int(no),
-                    'title': title,
-                    'url': url,
-                    'create_time': target_datetime,
+                    'no': int(entry.no),
+                }
+                if self._post_already_exists((category, entry.no), already_exists_post):
+                    self.db_controller.refresh_native_metrics(
+                        'Realtime', query, entry.metrics_dict()
+                    )
+                    continue
+
+                gpt_obj_id = self.get_gpt_obj(entry.no)
+                contents = self.get_board_contents(
+                    url=entry.url, category=category, no=entry.no
+                )
+                document = {
+                    'site': SITE_THEQOO,
+                    'category': category,
+                    'no': int(entry.no),
+                    'title': entry.title,
+                    'url': entry.url,
+                    'create_time': entry.created_at,
                     'GPTAnswer': gpt_obj_id,
-                    'contents': contents
-                })
-                logger.info(f"Post {(category, no)} inserted successfully")
+                    'contents': contents,
+                    **entry.metrics_dict(),
+                }
+                self.db_controller.insert_one('Realtime', document)
+                logger.info(f"Post {(category, entry.no)} inserted successfully")
             except Exception as e:
-                logger.error(f"Error Save To DB {category, no}: {e}")
+                logger.error(f"Error Save To DB {category, entry.no}: {e}")
 
         logger.info({"already exists post": already_exists_post})
         return True
@@ -58,7 +70,7 @@ class Theqoo(AbstractCommunityWebsite):
         _url = "https://theqoo.net/hot/" + no
         content_list = []
         try:
-            req = requests.get(_url, headers=self.g_headers[0])
+            req = requests.get(_url, headers=self.g_headers[0], timeout=10)
             req.raise_for_status()
             html_content = req.text
             soup = BeautifulSoup(html_content, 'html.parser')
@@ -110,8 +122,16 @@ class Theqoo(AbstractCommunityWebsite):
     
     def get_board_list(self):
         """ 게시판에서 URL, 게시글 번호, 생성 시간, 제목 추출 """
+        return [
+            (entry.url, str(entry.no), entry.created_at, entry.title)
+            for entry in self.get_board_entries()
+        ]
+
+    def get_board_entries(self):
         try:
-            req = requests.get('https://theqoo.net/hot', headers=self.g_headers[0])
+            req = requests.get(
+                'https://theqoo.net/hot', headers=self.g_headers[0], timeout=10
+            )
             req.raise_for_status()
             html_content = req.text
             soup = BeautifulSoup(html_content, 'html.parser')
@@ -120,6 +140,7 @@ class Theqoo(AbstractCommunityWebsite):
             return []
 
         board_list = []
+        metrics_crawled_at = datetime.now(timezone.utc)
         li_elements = soup.select('.hide_notice tr')
 
         for li in li_elements:
@@ -130,8 +151,12 @@ class Theqoo(AbstractCommunityWebsite):
                     if not rank_text.isdigit():
                         continue
 
-                    title = elements[2].get_text(strip=True)
-                    url = urljoin("https://theqoo.net", elements[2].find('a')['href'])
+                    title_cell = li.select_one('td.title') or elements[2]
+                    title_element = title_cell.find('a', href=True)
+                    if not title_element:
+                        continue
+                    title = title_element.get_text(" ", strip=True)
+                    url = urljoin("https://theqoo.net", title_element['href'])
                     path_parts = [part for part in urlparse(url).path.split('/') if part]
                     if len(path_parts) < 2 or path_parts[0] != 'hot' or not path_parts[1].isdigit():
                         continue
@@ -141,12 +166,31 @@ class Theqoo(AbstractCommunityWebsite):
                     if '-' in time_text or ':' not in time_text:
                         break  # Skip older posts
 
-                    now = datetime.now()
                     hour, minute = map(int, time_text.split(':'))
-                    target_datetime = datetime(now.year, now.month, now.day, hour, minute)
+                    target_datetime = recent_source_datetime(hour, minute)
 
-                    # ✅ 튜플로 반환
-                    board_list.append((url, no, target_datetime, title))
+                    reply_element = title_cell.select_one('.replyNum')
+                    board_list.append(
+                        BoardListEntry(
+                            url=url,
+                            category='hot',
+                            no=no,
+                            title=title,
+                            created_at=target_datetime,
+                            native_comment_count=(
+                                parse_native_count(reply_element)
+                                if reply_element is not None
+                                else 0
+                            ),
+                            native_like_count=None,
+                            native_view_count=parse_native_count(
+                                li.select_one('td.m_no')
+                                or (elements[4] if len(elements) > 4 else None)
+                            ),
+                            source_rank=len(board_list) + 1,
+                            metrics_crawled_at=metrics_crawled_at,
+                        )
+                    )
 
                 except Exception as e:
                     logger.error(f"Error parsing post: {e}")

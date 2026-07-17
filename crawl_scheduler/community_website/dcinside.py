@@ -1,12 +1,14 @@
 import re
 from bs4 import BeautifulSoup
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import parse_qs, urljoin, urlparse
+from zoneinfo import ZoneInfo
 from crawl_scheduler.config import Config
 from crawl_scheduler.crawled_content import image_block, metadata_image_block, text_block, video_block
 from crawl_scheduler.db.postgres_controller import PostgresController
 from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
+from crawl_scheduler.community_website.board_list_entry import BoardListEntry, parse_native_count, recent_source_datetime
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_DCINSIDE, DEFAULT_TAG
 import os
 from crawl_scheduler.utils.loghandler import logger
@@ -28,38 +30,60 @@ class Dcinside(AbstractCommunityWebsite):
 
     def get_realtime_best(self):
         already_exists_post = []
-        board_list = self.get_board_list()  # 🔹 분리한 함수 호출
+        board_entries = self.get_board_entries()
 
-        for url, category, no, title, time_obj in board_list:  # ✅ 튜플 언패킹 활용
+        for entry in board_entries:
             try:
-                if self._post_already_exists(category, no):
-                    already_exists_post.append((category, no))
+                query = {
+                    'site': SITE_DCINSIDE,
+                    'category': entry.category,
+                    'no': int(entry.no),
+                }
+                if self._post_already_exists(entry.category, entry.no):
+                    self.db_controller.refresh_native_metrics(
+                        'Realtime', query, entry.metrics_dict()
+                    )
+                    already_exists_post.append((entry.category, entry.no))
                     continue
 
-                gpt_obj_id = self.get_gpt_obj((category, no))
-                contents = self.get_board_contents(url=url, category=category, no=no)
+                gpt_obj_id = self.get_gpt_obj((entry.category, entry.no))
+                contents = self.get_board_contents(
+                    url=entry.url, category=entry.category, no=entry.no
+                )
 
-                self.db_controller.insert_one('Realtime', {
+                document = {
                     'site': SITE_DCINSIDE,
-                    'category': category,
-                    'no': int(no),
-                    'title': title,
-                    'url': url,
-                    'create_time': time_obj,
+                    'category': entry.category,
+                    'no': int(entry.no),
+                    'title': entry.title,
+                    'url': entry.url,
+                    'create_time': entry.created_at,
                     'gpt_answer': gpt_obj_id,
-                    'contents': contents
-                })
-                logger.info(f"Post {(category, no)} inserted successfully")
+                    'contents': contents,
+                    **entry.metrics_dict(),
+                }
+                self.db_controller.insert_one('Realtime', document)
+                logger.info(f"Post {(entry.category, entry.no)} inserted successfully")
             except Exception as e:
-                logger.error(f"Error Save To DB {category, no}: {e}")
+                logger.error(f"Error Save To DB {entry.category, entry.no}: {e}")
 
         logger.info("Already exists post: %s", already_exists_post)
         return True
 
     def get_board_list(self):
         """ 게시판에서 URL, 카테고리, 게시글 번호, 생성 시간, 제목 추출 """
+        return [
+            (entry.url, entry.category, str(entry.no), entry.title, entry.created_at)
+            for entry in self.get_board_entries()
+        ]
+
+    def get_board_entries(self):
         try:
-            req = requests.get('https://gall.dcinside.com/board/lists/?id=dcbest', headers=self.g_headers[0])
+            req = requests.get(
+                'https://gall.dcinside.com/board/lists/?id=dcbest',
+                headers=self.g_headers[0],
+                timeout=10,
+            )
             req.raise_for_status()  # Check for HTTP errors
             html_content = req.text
             soup = BeautifulSoup(html_content, 'html.parser')
@@ -68,12 +92,15 @@ class Dcinside(AbstractCommunityWebsite):
             return []
 
         board_list = []
+        metrics_crawled_at = datetime.now(timezone.utc)
         tr_elements = soup.select('tr.ub-content')
 
         for tr in tr_elements:
             try:
                 # URL 추출
-                a_tag = tr.find('a', href=True)
+                a_tag = tr.select_one('td.gall_tit > a[href*="/board/view/"]')
+                if not a_tag:
+                    a_tag = tr.find('a', href=True)
                 if not a_tag:
                     continue
 
@@ -92,8 +119,29 @@ class Dcinside(AbstractCommunityWebsite):
                 # 시간 처리
                 time_obj = self.parse_time(tr.find('td', class_='gall_date'))
 
-                # ✅ 튜플로 반환
-                board_list.append((url, category, no, title, time_obj))
+                reply_element = tr.select_one('.reply_num')
+                board_list.append(
+                    BoardListEntry(
+                        url=url,
+                        category=category,
+                        no=no,
+                        title=title,
+                        created_at=time_obj,
+                        native_comment_count=(
+                            parse_native_count(reply_element)
+                            if reply_element is not None
+                            else 0
+                        ),
+                        native_like_count=parse_native_count(
+                            tr.select_one('.gall_recommend')
+                        ),
+                        native_view_count=parse_native_count(
+                            tr.select_one('.gall_count')
+                        ),
+                        source_rank=len(board_list) + 1,
+                        metrics_crawled_at=metrics_crawled_at,
+                    )
+                )
 
             except Exception as e:
                 logger.error(f"Error parsing post: {e}")
@@ -104,7 +152,16 @@ class Dcinside(AbstractCommunityWebsite):
         """ 시간 문자열을 datetime 객체로 변환 """
         if not time_tag:
             return None
-        
+
+        exact_time = time_tag.get('title')
+        if exact_time:
+            try:
+                return datetime.strptime(exact_time, '%Y-%m-%d %H:%M:%S').replace(
+                    tzinfo=ZoneInfo('Asia/Seoul')
+                )
+            except ValueError:
+                pass
+
         time_str = time_tag.get_text(strip=True)
 
         # 만약 이미 날짜가 포함되어 있다면(예: '2025-02-17 02.16')
@@ -121,18 +178,23 @@ class Dcinside(AbstractCommunityWebsite):
             # 시간만 있다면 오늘 날짜와 결합 (예: '16:55' 또는 '02.16')
             if '.' in time_str and ':' not in time_str:
                 time_str = time_str.replace('.', ':')
-            today_date = datetime.today().strftime('%Y-%m-%d')
-            datetime_str = f"{today_date} {time_str}"
+            try:
+                hour, minute = map(int, time_str.split(':'))
+                return recent_source_datetime(hour, minute)
+            except ValueError:
+                return None
 
         try:
-            return datetime.strptime(datetime_str, '%Y-%m-%d %H:%M')
+            return datetime.strptime(datetime_str, '%Y-%m-%d %H:%M').replace(
+                tzinfo=ZoneInfo('Asia/Seoul')
+            )
         except ValueError:
             return None  # 파싱 실패 시 None 반환
 
     def get_board_contents(self, category= None, no=None, url=None):
         content_list = []
         try:
-            respone = requests.get(url, headers=self.g_headers[0])
+            respone = requests.get(url, headers=self.g_headers[0], timeout=10)
             respone.raise_for_status()
             soup = BeautifulSoup(respone.text, 'html.parser')
             metadata_block = metadata_image_block(
