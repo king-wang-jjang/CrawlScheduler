@@ -2,6 +2,8 @@ from datetime import datetime, timedelta, timezone
 import sys
 from pathlib import Path
 
+import pytest
+
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SERVICE_ROOT))
@@ -543,3 +545,146 @@ def test_best_lists_apply_decay_after_the_last_score_update(tmp_path):
     assert realtime[0]["hot_score"] > realtime[1]["hot_score"]
     assert daily[0]["id"] == "fresh-lower-score"
     assert daily[0]["daily_score"] > daily[1]["daily_score"]
+
+
+def test_daily_top10_snapshot_uses_seoul_date_and_rank_order(tmp_path):
+    from sqlalchemy import inspect
+
+    from crawl_scheduler.db.models import Board, DailyTop10Snapshot
+    from crawl_scheduler.db.postgres import get_engine, get_session_factory
+    from crawl_scheduler.db.postgres_controller import PostgresController
+
+    controller = PostgresController(database_url=f"sqlite:///{tmp_path / 'crawler.db'}")
+    captured_at = datetime(2026, 7, 19, 15, 5, tzinfo=timezone.utc)
+    with get_session_factory(controller.database_url)() as session:
+        session.add_all(
+            [
+                Board(
+                    id=f"board-{rank}",
+                    category="humor",
+                    no=rank,
+                    site="dcinside",
+                    title=f"board {rank}",
+                    url=f"https://example.com/{rank}",
+                    created_at=captured_at,
+                    score_updated_at=captured_at,
+                    daily_score=float(13 - rank),
+                )
+                for rank in range(1, 13)
+            ]
+        )
+        session.commit()
+
+    assert controller.record_daily_top10_snapshot(captured_at=captured_at) == 10
+
+    with get_session_factory(controller.database_url)() as session:
+        snapshots = (
+            session.query(DailyTop10Snapshot)
+            .order_by(DailyTop10Snapshot.rank)
+            .all()
+        )
+
+    assert [snapshot.snapshot_date.isoformat() for snapshot in snapshots] == [
+        "2026-07-20"
+    ] * 10
+    assert [snapshot.rank for snapshot in snapshots] == list(range(1, 11))
+    assert [snapshot.board_id for snapshot in snapshots] == [
+        f"board-{rank}" for rank in range(1, 11)
+    ]
+    assert [snapshot.daily_score for snapshot in snapshots] == [
+        float(score) for score in range(12, 2, -1)
+    ]
+
+    indexes = inspect(get_engine(controller.database_url)).get_indexes(
+        "daily_top10_snapshots"
+    )
+    assert any(
+        index["name"] == "ix_daily_top10_snapshots_snapshot_date"
+        and index["column_names"] == ["snapshot_date"]
+        for index in indexes
+    )
+    unique_constraints = {
+        constraint["name"]: tuple(constraint["column_names"])
+        for constraint in inspect(
+            get_engine(controller.database_url)
+        ).get_unique_constraints("daily_top10_snapshots")
+    }
+    assert unique_constraints == {
+        "uq_daily_top10_snapshots_date_rank": ("snapshot_date", "rank"),
+        "uq_daily_top10_snapshots_date_board": ("snapshot_date", "board_id"),
+    }
+
+
+def test_daily_top10_snapshot_replaces_only_the_same_seoul_date(tmp_path, monkeypatch):
+    from crawl_scheduler.db.models import Board, DailyTop10Snapshot
+    from crawl_scheduler.db.postgres import get_session_factory
+    from crawl_scheduler.db.postgres_controller import PostgresController
+
+    controller = PostgresController(database_url=f"sqlite:///{tmp_path / 'crawler.db'}")
+    first_capture = datetime(2026, 7, 20, 10, tzinfo=timezone.utc)
+    second_capture = first_capture + timedelta(hours=1)
+    next_day_capture = datetime(2026, 7, 20, 15, 1, tzinfo=timezone.utc)
+    with get_session_factory(controller.database_url)() as session:
+        session.add_all(
+            [
+                Board(
+                    id="first",
+                    category="humor",
+                    no=1,
+                    site="dcinside",
+                    title="first",
+                    url="https://example.com/first",
+                    created_at=first_capture,
+                    score_updated_at=first_capture,
+                    daily_score=20,
+                ),
+                Board(
+                    id="second",
+                    category="humor",
+                    no=2,
+                    site="dcinside",
+                    title="second",
+                    url="https://example.com/second",
+                    created_at=first_capture,
+                    score_updated_at=first_capture,
+                    daily_score=10,
+                ),
+            ]
+        )
+        session.commit()
+
+    controller.record_daily_top10_snapshot(captured_at=first_capture, limit=1)
+    with get_session_factory(controller.database_url)() as session:
+        session.get(Board, "second").daily_score = 30
+        session.get(Board, "second").score_updated_at = second_capture
+        session.commit()
+
+    def fail_snapshot_creation(self, **kwargs):
+        raise RuntimeError("simulated snapshot insert failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(DailyTop10Snapshot, "__init__", fail_snapshot_creation)
+        with pytest.raises(RuntimeError, match="simulated snapshot insert failure"):
+            controller.record_daily_top10_snapshot(captured_at=second_capture, limit=1)
+
+    with get_session_factory(controller.database_url)() as session:
+        preserved_snapshot = session.query(DailyTop10Snapshot).one()
+        assert preserved_snapshot.board_id == "first"
+        assert preserved_snapshot.captured_at == first_capture.replace(tzinfo=None)
+
+    controller.record_daily_top10_snapshot(captured_at=second_capture, limit=1)
+    controller.record_daily_top10_snapshot(captured_at=next_day_capture, limit=1)
+
+    with get_session_factory(controller.database_url)() as session:
+        snapshots = (
+            session.query(DailyTop10Snapshot)
+            .order_by(DailyTop10Snapshot.snapshot_date, DailyTop10Snapshot.rank)
+            .all()
+        )
+
+    assert len(snapshots) == 2
+    assert snapshots[0].snapshot_date.isoformat() == "2026-07-20"
+    assert snapshots[0].board_id == "second"
+    assert snapshots[0].captured_at == second_capture.replace(tzinfo=None)
+    assert snapshots[1].snapshot_date.isoformat() == "2026-07-21"
+    assert snapshots[1].board_id == "second"

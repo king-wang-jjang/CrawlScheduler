@@ -29,10 +29,15 @@ def test_once_flag_runs_crawl_and_exits(monkeypatch):
 
     calls = []
 
+    class FakeDB:
+        def record_daily_top10_snapshot(self):
+            calls.append("snapshot")
+
     monkeypatch.setattr(main, "get_realtime_best", lambda: calls.append("crawl"))
+    monkeypatch.setattr(main, "PostgresController", FakeDB)
 
     assert main.main(["--once"]) == 0
-    assert calls == ["crawl"]
+    assert calls == ["crawl", "snapshot"]
 
 
 def test_seed_alias_runs_crawl_and_exits(monkeypatch):
@@ -40,10 +45,42 @@ def test_seed_alias_runs_crawl_and_exits(monkeypatch):
 
     calls = []
 
+    class FakeDB:
+        def record_daily_top10_snapshot(self):
+            calls.append("snapshot")
+
     monkeypatch.setattr(main, "get_realtime_best", lambda: calls.append("crawl"))
+    monkeypatch.setattr(main, "PostgresController", FakeDB)
 
     assert main.main(["--seed"]) == 0
-    assert calls == ["crawl"]
+    assert calls == ["crawl", "snapshot"]
+
+
+def test_snapshot_failure_is_logged_without_stopping_the_job(monkeypatch):
+    from crawl_scheduler import main
+
+    calls = []
+
+    class FailingDB:
+        def record_daily_top10_snapshot(self):
+            calls.append("snapshot")
+            raise RuntimeError("database unavailable")
+
+    class FakeLogger:
+        def error(self, message, exc_info=False):
+            calls.append((message, exc_info))
+
+    monkeypatch.setattr(main, "get_realtime_best", lambda: calls.append("crawl"))
+    monkeypatch.setattr(main, "PostgresController", FailingDB)
+    monkeypatch.setattr(main, "logger", FakeLogger())
+
+    main.job()
+
+    assert calls == [
+        "crawl",
+        "snapshot",
+        ("Error - daily Top10 snapshot: database unavailable", True),
+    ]
 
 
 def test_theqoo_board_list_skips_notice_rows_before_hot_posts(monkeypatch):

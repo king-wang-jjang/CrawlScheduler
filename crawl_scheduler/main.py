@@ -10,6 +10,7 @@ from crawl_scheduler.community_website.dcinside import Dcinside
 from crawl_scheduler.community_website.ppomppu import Ppomppu
 from crawl_scheduler.community_website.theqoo import Theqoo
 from crawl_scheduler.community_website.ygosu import Ygosu
+from crawl_scheduler.db.postgres_controller import PostgresController
 from crawl_scheduler.utils.loghandler import logger
 
 DEFAULT_CRAWLER_FACTORIES = (Ygosu, Ppomppu, Theqoo, Dcinside)
@@ -41,6 +42,10 @@ def get_realtime_best(crawler_factories=DEFAULT_CRAWLER_FACTORIES):
 
 def job():
     get_realtime_best()
+    try:
+        PostgresController().record_daily_top10_snapshot()
+    except Exception as e:
+        logger.error(f"Error - daily Top10 snapshot: {str(e)}", exc_info=True)
 
 
 def parse_args(argv=None):

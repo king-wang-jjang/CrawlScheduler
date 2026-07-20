@@ -3,8 +3,9 @@ from datetime import datetime, timedelta, timezone
 import json
 from math import exp, isfinite
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete, desc, func, inspect, select, text
+from sqlalchemy import DateTime, delete, desc, func, inspect, literal, select, text
 
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, DEFAULT_TAG
 from crawl_scheduler.crawled_content import (
@@ -12,7 +13,12 @@ from crawl_scheduler.crawled_content import (
     first_thumbnail_path,
     normalize_contents,
 )
-from crawl_scheduler.db.models import Board, BoardMetricSnapshot, CrawlerLog
+from crawl_scheduler.db.models import (
+    Board,
+    BoardMetricSnapshot,
+    CrawlerLog,
+    DailyTop10Snapshot,
+)
 from crawl_scheduler.db.postgres import Base, get_engine, get_session_factory
 from crawl_scheduler.popularity import (
     DAILY_DECAY_HOURS,
@@ -26,6 +32,7 @@ from crawl_scheduler.utils.llm import LLM
 BOARD_COLLECTIONS = {"realtime", "daily"}
 SNAPSHOT_RETENTION_DAYS = 7
 SNAPSHOT_CLEANUP_INTERVAL = timedelta(hours=1)
+SEOUL_TIMEZONE = ZoneInfo("Asia/Seoul")
 
 
 @dataclass(frozen=True)
@@ -162,6 +169,54 @@ class PostgresController:
 
     def get_daily_best(self, index: int, limit: int) -> list[dict]:
         return self._list_boards(index=index, limit=limit, daily=True)
+
+    def record_daily_top10_snapshot(
+        self,
+        captured_at: datetime | None = None,
+        limit: int = 10,
+    ) -> int:
+        """Atomically replace one Seoul calendar day's daily ranking snapshot."""
+        captured_at = self._snapshot_captured_at(captured_at)
+        snapshot_date = captured_at.astimezone(SEOUL_TIMEZONE).date()
+        snapshot_limit = max(int(limit), 0)
+        score_expression = self._effective_score_expression(
+            daily=True,
+            as_of=captured_at,
+        )
+
+        with get_session_factory(self.database_url)() as session:
+            with session.begin():
+                ranked_boards = session.execute(
+                    select(Board.id, score_expression.label("effective_daily_score"))
+                    .order_by(
+                        desc(score_expression),
+                        desc(Board.like_count),
+                        desc(Board.created_at),
+                    )
+                    .limit(snapshot_limit)
+                ).all()
+                session.execute(
+                    delete(DailyTop10Snapshot).where(
+                        DailyTop10Snapshot.snapshot_date == snapshot_date
+                    )
+                )
+                session.add_all(
+                    [
+                        DailyTop10Snapshot(
+                            snapshot_date=snapshot_date,
+                            rank=rank,
+                            board_id=board_id,
+                            daily_score=float(daily_score or 0.0),
+                            captured_at=captured_at,
+                        )
+                        for rank, (board_id, daily_score) in enumerate(
+                            ranked_boards,
+                            start=1,
+                        )
+                    ]
+                )
+
+        return len(ranked_boards)
 
     def _upsert_board(self, collection_name: str, document: dict) -> Board:
         source_id = self._source_id_from_document(collection_name, document)
@@ -318,22 +373,40 @@ class PostgresController:
                 for board in boards
             ]
 
-    def _effective_score_expression(self, *, daily: bool):
+    def _effective_score_expression(
+        self,
+        *,
+        daily: bool,
+        as_of: datetime | None = None,
+    ):
         score_column = Board.daily_score if daily else Board.hot_score
         decay_hours = DAILY_DECAY_HOURS if daily else HOT_DECAY_HOURS
         updated_at = func.coalesce(Board.score_updated_at, Board.created_at)
+        reference_time = (
+            func.current_timestamp()
+            if as_of is None
+            else literal(as_of, type_=DateTime(timezone=True))
+        )
         engine = get_engine(self.database_url)
         if engine.dialect.name == "postgresql":
             elapsed_hours = func.greatest(
-                func.extract("epoch", func.current_timestamp() - updated_at) / 3600.0,
+                func.extract("epoch", reference_time - updated_at) / 3600.0,
                 0.0,
             )
         else:
             elapsed_hours = func.max(
-                (func.julianday(func.current_timestamp()) - func.julianday(updated_at)) * 24.0,
+                (func.julianday(reference_time) - func.julianday(updated_at)) * 24.0,
                 0.0,
             )
         return func.coalesce(score_column, 0.0) * func.exp(-elapsed_hours / decay_hours)
+
+    @staticmethod
+    def _snapshot_captured_at(captured_at: datetime | None) -> datetime:
+        if captured_at is None:
+            return datetime.now(timezone.utc)
+        if captured_at.tzinfo is None:
+            return captured_at.replace(tzinfo=timezone.utc)
+        return captured_at.astimezone(timezone.utc)
 
     def _insert_log(self, document: dict) -> InsertOneResult:
         payload = self._json_safe(document)
