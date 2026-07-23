@@ -41,7 +41,12 @@ class PopularCommunityCrawler(AbstractCommunityWebsite):
 
     def get_realtime_best(self):
         existing_posts = []
-        for entry in self.get_board_entries():
+        board_entries = self.get_board_entries()
+        if not board_entries:
+            logger.error("%s popular feed returned no posts", self.site)
+            return False
+
+        for entry in board_entries:
             query = {"site": self.site, "category": entry.category, "no": int(entry.no)}
             try:
                 if self.db_controller.find("Realtime", query):
@@ -87,7 +92,12 @@ class PopularCommunityCrawler(AbstractCommunityWebsite):
         if not url:
             return []
         try:
-            response = requests.get(url, headers=BROWSER_HEADERS, timeout=15)
+            response = requests.get(
+                url,
+                headers=BROWSER_HEADERS,
+                proxies=self.request_proxies(),
+                timeout=15,
+            )
             response.raise_for_status()
             html = getattr(response, "content", None) or response.text
             soup = BeautifulSoup(html, "html.parser")
@@ -126,6 +136,7 @@ class PopularCommunityCrawler(AbstractCommunityWebsite):
                 alt_text=tag.get("alt"),
                 headers={**BROWSER_HEADERS, "Referer": url},
                 created_at=created_at,
+                proxies=self.request_proxies(),
             )
             if not file_path:
                 continue
@@ -157,9 +168,14 @@ class PopularCommunityCrawler(AbstractCommunityWebsite):
     def is_ad(self, title=None):
         return False
 
-    @staticmethod
-    def soup_from_url(url):
-        response = requests.get(url, headers=BROWSER_HEADERS, timeout=15)
+    @classmethod
+    def soup_from_url(cls, url):
+        response = requests.get(
+            url,
+            headers=BROWSER_HEADERS,
+            proxies=cls.request_proxies(),
+            timeout=15,
+        )
         response.raise_for_status()
         html = getattr(response, "content", None) or response.text
         return BeautifulSoup(html, "html.parser")
@@ -167,3 +183,10 @@ class PopularCommunityCrawler(AbstractCommunityWebsite):
     @staticmethod
     def utc_now():
         return datetime.now(timezone.utc)
+
+    @staticmethod
+    def request_proxies():
+        proxy_url = os.getenv("CRAWLER_HTTP_PROXY", "").strip()
+        if not proxy_url:
+            return None
+        return {"http": proxy_url, "https": proxy_url}

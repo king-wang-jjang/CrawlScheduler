@@ -55,6 +55,7 @@ class AbstractCommunityWebsite(ABC):
         alt_text=None,
         headers=None,
         created_at=None,
+        proxies=None,
     ):
         try:
             media_url = self.normalize_media_url(url)
@@ -65,7 +66,13 @@ class AbstractCommunityWebsite(ABC):
             if not headers:
                 headers = {"User-Agent": "Mozilla/5.0", "Cache-Control": "no-cache"}
 
-            response = requests.get(media_url, headers=headers, stream=True, timeout=10)
+            response = requests.get(
+                media_url,
+                headers=headers,
+                proxies=proxies,
+                stream=True,
+                timeout=10,
+            )
             child_class_name = self.__class__.__name__
             root_path = Config().get_env("ROOT") or "./media"
             path = dated_post_directory(

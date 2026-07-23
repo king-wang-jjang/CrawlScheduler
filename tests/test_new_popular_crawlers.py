@@ -124,3 +124,16 @@ def test_new_popular_posts_enter_common_ai_queue(
     assert len(fake_db.documents) == 1
     assert fake_db.documents[0]["site"] == site
     assert fake_db.documents[0]["gpt_answer"] == DEFAULT_GPT_ANSWER
+
+
+def test_optional_proxy_is_used_for_popular_site_requests(monkeypatch):
+    from crawl_scheduler.community_website.popular_community import (
+        PopularCommunityCrawler,
+    )
+
+    monkeypatch.setenv("CRAWLER_HTTP_PROXY", "http://100.64.0.1:3128")
+
+    assert PopularCommunityCrawler.request_proxies() == {
+        "http": "http://100.64.0.1:3128",
+        "https": "http://100.64.0.1:3128",
+    }

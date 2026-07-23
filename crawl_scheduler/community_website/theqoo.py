@@ -29,7 +29,12 @@ class Theqoo(PopularCommunityCrawler):
 
     def get_board_entries(self):
         try:
-            response = requests.get(self.list_url, headers=BROWSER_HEADERS, timeout=15)
+            response = requests.get(
+                self.list_url,
+                headers=BROWSER_HEADERS,
+                proxies=self.request_proxies(),
+                timeout=15,
+            )
             response.raise_for_status()
             html = getattr(response, "content", None) or response.text
             soup = BeautifulSoup(html, "html.parser")

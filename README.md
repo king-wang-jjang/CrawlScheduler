@@ -19,6 +19,8 @@ poetry run python crawl_scheduler/main.py --run-on-start --interval-minutes 5
 ```env
 DATABASE_URL=postgresql+psycopg://<user>:<password>@localhost:5432/<db>
 DOCKER_DATABASE_URL=postgresql+psycopg://<user>:<password>@kingwangjjang-postgres:5432/<db>
+# 데이터센터 IP가 차단될 때만 사용하는 선택값
+CRAWLER_HTTP_PROXY=http://<private-proxy-host>:3128
 ```
 
 컨테이너에서 수집한 미디어는 `CRAWLER_MEDIA_HOST_ROOT`(기본값
