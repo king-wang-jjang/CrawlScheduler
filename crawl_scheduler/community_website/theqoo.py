@@ -1,262 +1,90 @@
-import re
-from bs4 import BeautifulSoup
-import requests
-from datetime import datetime, timezone
+from datetime import datetime
 from urllib.parse import urljoin, urlparse
-from crawl_scheduler.config import Config
-from crawl_scheduler.crawled_content import image_block, metadata_image_block, text_block, video_block
+from zoneinfo import ZoneInfo
+
+import requests
+from bs4 import BeautifulSoup
+
+from crawl_scheduler.community_website.board_list_entry import (
+    BoardListEntry,
+    parse_native_count,
+    recent_source_datetime,
+)
+from crawl_scheduler.community_website.popular_community import (
+    BROWSER_HEADERS,
+    PopularCommunityCrawler,
+)
+from crawl_scheduler.constants import SITE_THEQOO
 from crawl_scheduler.db.postgres_controller import PostgresController
-from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
-from crawl_scheduler.community_website.board_list_entry import BoardListEntry, parse_native_count, recent_source_datetime
-from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_THEQOO, DEFAULT_TAG
-import os
 from crawl_scheduler.utils.loghandler import logger
 
-class Theqoo(AbstractCommunityWebsite):
-    g_headers = [
-        {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'},
-    ]
+
+class Theqoo(PopularCommunityCrawler):
+    site = SITE_THEQOO
+    list_url = "https://theqoo.net/hot?filter_mode=normal"
+    body_selectors = (".xe_content", ".rd_body")
 
     def __init__(self):
         self.db_controller = PostgresController()
-   
-    def get_daily_best(self):
-        pass
-    
-    def get_realtime_best(self):
-        category = 'hot'  # theqoo는 카테고리를 hot으로 단일 고정 (20250214)
-        already_exists_post = []
-        board_entries = self.get_board_entries()
 
-        for entry in board_entries:
-            try:
-                # Check if post already exists in DB
-                query = {
-                    'site': SITE_THEQOO,
-                    'category': category,
-                    'no': int(entry.no),
-                }
-                if self._post_already_exists((category, entry.no), already_exists_post):
-                    self.db_controller.refresh_native_metrics(
-                        'Realtime', query, entry.metrics_dict()
-                    )
-                    continue
-
-                gpt_obj_id = self.get_gpt_obj(entry.no)
-                contents = self.get_board_contents(
-                    url=entry.url, category=category, no=entry.no
-                )
-                document = {
-                    'site': SITE_THEQOO,
-                    'category': category,
-                    'no': int(entry.no),
-                    'title': entry.title,
-                    'url': entry.url,
-                    'create_time': entry.created_at,
-                    'GPTAnswer': gpt_obj_id,
-                    'contents': contents,
-                    **entry.metrics_dict(),
-                }
-                self.db_controller.insert_one('Realtime', document)
-                logger.info(f"Post {(category, entry.no)} inserted successfully")
-            except Exception as e:
-                logger.error(f"Error Save To DB {category, entry.no}: {e}")
-
-        logger.info({"already exists post": already_exists_post})
-        return True
-    
-    def get_board_contents(self, category= None, no=None, url=None):
-        _url = "https://theqoo.net/hot/" + no
-        content_list = []
+    def get_board_entries(self):
         try:
-            req = requests.get(_url, headers=self.g_headers[0], timeout=10)
-            req.raise_for_status()
-            html_content = req.text
-            soup = BeautifulSoup(html_content, 'html.parser')
-            content_list = []
-            metadata_block = metadata_image_block(
-                super().metadata_image_url_from_soup(soup, base_url=_url)
-            )
-            if metadata_block:
-                content_list.append(metadata_block)
-            write_div = soup.find('div', class_='rd_body clear')
-
-            if write_div:
-                find_all = write_div.find_all(['p', 'div'])
-                for p in find_all:
-                    if p.find('img'):
-                        img_url = super().media_url_from_tag(p.find('img'), base_url=_url)
-                        if not img_url:
-                            continue
-                        try:
-                            file_path = super().save_file(img_url, category=category, no=no)
-                            if not file_path:
-                                continue
-                            img_txt = super().img_to_text(os.path.join(Config().get_env('ROOT') or './media', file_path))
-                            block = image_block(media_path=file_path, source_url=img_url, text=img_txt)
-                            if block:
-                                content_list.append(block)
-                        except Exception as e:
-                            logger.error(f"Error processing image: {url} {e}")
-                    elif p.find('video'):
-                        video_url = super().media_url_from_tag(p.find('video').find('source'), base_url=_url)
-                        if not video_url:
-                            continue
-                        try:
-                            file_path = super().save_file(video_url, category=category, no=no)
-                            if file_path:
-                                block = video_block(media_path=file_path, source_url=video_url)
-                                if block:
-                                    content_list.append(block)
-                        except Exception as e:
-                            logger.error(f"Error saving video: {e}")
-                    else:
-                        block = text_block(p.text)
-                        if block:
-                            content_list.append(block)
-            return content_list
-        except Exception as e:
-            logger.error(f"Error fetching board contents for {no}: {e}")
+            response = requests.get(self.list_url, headers=BROWSER_HEADERS, timeout=15)
+            response.raise_for_status()
+            html = getattr(response, "content", None) or response.text
+            soup = BeautifulSoup(html, "html.parser")
+        except Exception as exc:
+            logger.error("Get Theqoo HOT list error: %s", exc)
             return []
-    
+
+        entries = []
+        crawled_at = self.utc_now()
+        now = datetime.now(ZoneInfo("Asia/Seoul"))
+        for row in soup.select("tr[data-document_srl], .hide_notice tr"):
+            try:
+                if "notice" in (row.get("class") or []):
+                    continue
+                title_cell = row.select_one("td.title")
+                anchor = title_cell.select_one("a[href]") if title_cell else None
+                if not anchor:
+                    continue
+                url = urljoin("https://theqoo.net", anchor["href"])
+                path = [part for part in urlparse(url).path.split("/") if part]
+                if len(path) < 2 or path[0] != "hot" or not path[1].isdigit():
+                    continue
+                no = int(path[1])
+                regdate = row.get("data-regdate")
+                time_node = row.select_one("td.time")
+                if regdate and len(regdate) == 14:
+                    created_at = datetime.strptime(regdate, "%Y%m%d%H%M%S").replace(
+                        tzinfo=ZoneInfo("Asia/Seoul")
+                    )
+                else:
+                    time_text = time_node.get_text(strip=True) if time_node else ""
+                    if ":" not in time_text:
+                        continue
+                    hour, minute = map(int, time_text.split(":")[:2])
+                    created_at = recent_source_datetime(hour, minute, now=now)
+                entries.append(
+                    BoardListEntry(
+                        url=f"https://theqoo.net/hot/{no}",
+                        category="hot",
+                        no=no,
+                        title=anchor.get_text(" ", strip=True),
+                        created_at=created_at,
+                        native_comment_count=parse_native_count(title_cell.select_one(".replyNum")) or 0,
+                        native_like_count=None,
+                        native_view_count=parse_native_count(row.select_one("td.m_no")),
+                        source_rank=len(entries) + 1,
+                        metrics_crawled_at=crawled_at,
+                    )
+                )
+            except Exception as exc:
+                logger.error("Error parsing Theqoo HOT post: %s", exc)
+        return entries
+
     def get_board_list(self):
-        """ 게시판에서 URL, 게시글 번호, 생성 시간, 제목 추출 """
         return [
             (entry.url, str(entry.no), entry.created_at, entry.title)
             for entry in self.get_board_entries()
         ]
-
-    def get_board_entries(self):
-        try:
-            req = requests.get(
-                'https://theqoo.net/hot', headers=self.g_headers[0], timeout=10
-            )
-            req.raise_for_status()
-            html_content = req.text
-            soup = BeautifulSoup(html_content, 'html.parser')
-        except Exception as e:
-            logger.error(f"Get List Error: {e}")
-            return []
-
-        board_list = []
-        metrics_crawled_at = datetime.now(timezone.utc)
-        li_elements = soup.select('.hide_notice tr')
-
-        for li in li_elements:
-            elements = li.find_all('td')
-            if len(elements) > 1:
-                try:
-                    rank_text = elements[0].get_text(strip=True)
-                    if not rank_text.isdigit():
-                        continue
-
-                    title_cell = li.select_one('td.title') or elements[2]
-                    title_element = title_cell.find('a', href=True)
-                    if not title_element:
-                        continue
-                    title = title_element.get_text(" ", strip=True)
-                    url = urljoin("https://theqoo.net", title_element['href'])
-                    path_parts = [part for part in urlparse(url).path.split('/') if part]
-                    if len(path_parts) < 2 or path_parts[0] != 'hot' or not path_parts[1].isdigit():
-                        continue
-                    no = path_parts[1]
-                    time_text = elements[3].get_text(strip=True)
-
-                    if '-' in time_text or ':' not in time_text:
-                        break  # Skip older posts
-
-                    hour, minute = map(int, time_text.split(':'))
-                    target_datetime = recent_source_datetime(hour, minute)
-
-                    reply_element = title_cell.select_one('.replyNum')
-                    board_list.append(
-                        BoardListEntry(
-                            url=url,
-                            category='hot',
-                            no=no,
-                            title=title,
-                            created_at=target_datetime,
-                            native_comment_count=(
-                                parse_native_count(reply_element)
-                                if reply_element is not None
-                                else 0
-                            ),
-                            native_like_count=None,
-                            native_view_count=parse_native_count(
-                                li.select_one('td.m_no')
-                                or (elements[4] if len(elements) > 4 else None)
-                            ),
-                            source_rank=len(board_list) + 1,
-                            metrics_crawled_at=metrics_crawled_at,
-                        )
-                    )
-
-                except Exception as e:
-                    logger.error(f"Error parsing post: {e}")
-
-        return board_list
-
-    def save_file(self, url):
-        if not os.path.exists(self.download_path):
-            os.makedirs(self.download_path)
-
-        initial_file_count = len(os.listdir(self.download_path))
-        try:
-            script = f'''
-                var link = document.createElement('a');
-                link.href = "{url}";
-                link.target = "_blank";
-                link.click();
-            '''
-            self.driver.execute_script(script)
-
-
-            newest_file = max(os.listdir(self.download_path),
-                              key=lambda x: os.path.getctime(os.path.join(self.download_path, x)))
-            return os.path.join(self.download_path, newest_file)
-        except Exception as e:
-            logger.error(f"Error saving image from {url}: {e}")
-            return None
-
-    def _post_already_exists(self, board_id, already_exists_post):
-        # board_id는 (category, no) 튜플 형태를 기대
-        if isinstance(board_id, tuple) and len(board_id) == 2:
-            category, no = board_id
-            existing_instance = self.db_controller.find('Realtime', {'site': SITE_THEQOO, 'category': category, 'no': int(no)})
-        else:
-            # 하위호환: no만 들어온 경우 category=hot 고정
-            existing_instance = self.db_controller.find('Realtime', {'site': SITE_THEQOO, 'category': 'hot', 'no': int(board_id)})
-        if existing_instance:
-            already_exists_post.append(board_id)
-            return True
-        return False
-
-    def get_gpt_obj(self, board_id):
-        gpt_exists = self.db_controller.find('GPT', {'board_id': board_id, 'site': SITE_THEQOO})
-        if gpt_exists:
-            return gpt_exists[0]['_id']
-        else:
-            gpt_obj = self.db_controller.insert_one('GPT', {
-                'board_id': board_id,
-                'site': SITE_THEQOO,
-                'answer': DEFAULT_GPT_ANSWER,
-                'tag': DEFAULT_TAG
-            })
-            return gpt_obj.inserted_id
-
-    def _get_or_create_tag_object(self, board_id):
-        tag_exists = self.db_controller.find('TAG', {'board_id': board_id, 'site': SITE_THEQOO})
-        if tag_exists:
-            return tag_exists[0]['_id']
-        else:
-            tag_obj = self.db_controller.insert_one('TAG', {
-                'board_id': board_id,
-                'site': SITE_THEQOO,
-                'answer': DEFAULT_GPT_ANSWER,
-                'Tag': DEFAULT_TAG
-            })
-            return tag_obj.inserted_id
-
-    def is_ad():
-        pass

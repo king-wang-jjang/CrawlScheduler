@@ -144,7 +144,14 @@ class AbstractCommunityWebsite(ABC):
             return None
 
         candidates = []
-        for attr in ("data-original", "data-src", "data-lazy-src", "data-url", "src"):
+        for attr in (
+            "data-originalurl",
+            "data-original",
+            "data-src",
+            "data-lazy-src",
+            "data-url",
+            "src",
+        ):
             value = tag.get(attr)
             if value:
                 candidates.append(value)

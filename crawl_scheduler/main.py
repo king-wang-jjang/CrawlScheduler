@@ -10,10 +10,21 @@ from crawl_scheduler.community_website.dcinside import Dcinside
 from crawl_scheduler.community_website.ppomppu import Ppomppu
 from crawl_scheduler.community_website.theqoo import Theqoo
 from crawl_scheduler.community_website.ygosu import Ygosu
+from crawl_scheduler.community_website.fmkorea import Fmkorea
+from crawl_scheduler.community_website.arca import Arca
+from crawl_scheduler.community_website.inven import Inven
 from crawl_scheduler.db.postgres_controller import PostgresController
 from crawl_scheduler.utils.loghandler import logger
 
-DEFAULT_CRAWLER_FACTORIES = (Ygosu, Ppomppu, Theqoo, Dcinside)
+DEFAULT_CRAWLER_FACTORIES = (
+    Ygosu,
+    Ppomppu,
+    Theqoo,
+    Dcinside,
+    Fmkorea,
+    Arca,
+    Inven,
+)
 
 
 def get_realtime_best(crawler_factories=DEFAULT_CRAWLER_FACTORIES):

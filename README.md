@@ -1,84 +1,29 @@
 # CrawlScheduler
-사이트를 크롤링하는 스케쥴러
 
-## 소개
-CrawlScheduler는 다양한 커뮤니티 사이트에서 게시물을 크롤링하고, 이를 데이터베이스에 저장하는 스케줄러입니다. 이 프로젝트는 Ygosu, Ppomppu 사이트를 대상으로 하며, 향후 추가될 예정입니다.
+커뮤니티 인기 게시물을 수집해 PostgreSQL에 저장하는 스케줄러입니다.
 
-## 기능
-- **실시간 베스트 게시물 수집**: 실시간 베스트 게시물을 크롤링하여 데이터베이스에 저장합니다.
-- **게시물 내용 수집**: 게시물의 내용을 이미지, 비디오, 텍스트 형식으로 수집합니다.
+현재 디시인사이드, 뽐뿌, 와이고수, 더쿠, 에펨코리아, 아카라이브, 인벤의 인기글을
+5분 간격으로 수집합니다. 신규 글은 `analysis_status=pending`으로 저장되며
+`board-service`의 공통 AI 분석 워커가 요약·태그·참여도 점수를 생성합니다.
 
-## 사용 방법
-1. **환경 설정**: 필요한 라이브러리를 설치합니다.
-   ```bash
-   poetry install
-   ```
+## 실행
 
-2. **데이터베이스 설정**: PostgreSQL 연결 정보를 `.env`에 설정합니다.
+```bash
+poetry install
+poetry run python crawl_scheduler/main.py --once
+poetry run python crawl_scheduler/main.py --run-on-start --interval-minutes 5
+```
 
-   ```env
-   DATABASE_URL=postgresql+psycopg://<user>:<password>@localhost:5432/<db>
-   DOCKER_DATABASE_URL=postgresql+psycopg://<user>:<password>@kingwangjjang-postgres:5432/<db>
-   ```
+필수 환경 변수는 PostgreSQL 연결 문자열입니다.
 
-3. **스크립트 실행**: 아래 명령어로 스크립트를 실행하여 크롤링을 시작합니다.
-   ```bash
-   dev.sh
-   ```
-
-   초기 데이터 적재처럼 한 번만 크롤링하고 종료하려면 아래처럼 실행합니다.
-   ```bash
-   poetry run python crawl_scheduler/main.py --once
-   ```
-
-## 파일 구조
-crawl_scheduler/
-
-│
-
-├── community_website/
-
-│ ├── ygosu.py # Ygosu 사이트 크롤러
-
-│ ├── ppomppu.py # Ygosu 사이트 크롤러
-
-│
-
-├── db/
-
-│ ├── postgres.py # PostgreSQL 연결 설정
-
-│ ├── postgres_controller.py # PostgreSQL 저장 컨트롤러
-
-│
-
-├── constants.py # 상수 정의
-
-│
-
-├── utils/
-
-│ ├── loghandler.py # 로깅 핸들러
-
-│
-
-└── main.py # 메인 실행 파일
-
-
-## PostgreSQL 저장 방식
-크롤러는 `boards` 테이블에 게시물을 저장합니다. 중복 저장 방지는 `source_id`로 처리하며, `source_id`는 기본적으로 `site:category:no` 형식을 사용합니다.
-
-컨테이너 실행 시에는 `DOCKER_DATABASE_URL`이 `DATABASE_URL`로 주입됩니다. 로컬에서 직접 실행할 때는 `DATABASE_URL`을 설정하면 됩니다.
+```env
+DATABASE_URL=postgresql+psycopg://<user>:<password>@localhost:5432/<db>
+DOCKER_DATABASE_URL=postgresql+psycopg://<user>:<password>@kingwangjjang-postgres:5432/<db>
+```
 
 컨테이너에서 수집한 미디어는 `CRAWLER_MEDIA_HOST_ROOT`(기본값
-`/mnt/kingwangjjang`)에 저장됩니다. 크롤러의 `/app/public`과 API 서버의
-`/app/public`이 같은 호스트 디렉터리를 마운트해야 DB에 저장된 상대 경로를
-이미지 서버에서 제공할 수 있습니다. 로컬 직접 실행에서는 기존처럼
-`ROOT=./media`를 사용합니다.
+`/mnt/kingwangjjang`)에 저장됩니다. 게시글 미디어는 사이트/게시판/연/월/일/글 번호로
+분산해 단일 디렉터리의 엔트리 수가 과도하게 증가하지 않도록 합니다.
 
-
-## 기여
-기여를 원하시는 분은 이 저장소를 포크한 후, 변경 사항을 제안해 주세요. 
-
-## 라이센스
-이 프로젝트는 MIT 라이센스 하에 배포됩니다.
+사이트별 수집 범위와 AI 요약 흐름, 운영 점검 SQL은
+[docs/SITE_COVERAGE.md](docs/SITE_COVERAGE.md)를 참고하세요.
