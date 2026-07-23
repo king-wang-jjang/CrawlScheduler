@@ -17,12 +17,23 @@ DEFAULT_CRAWLER_FACTORIES = (Ygosu, Ppomppu, Theqoo, Dcinside)
 
 
 def get_realtime_best(crawler_factories=DEFAULT_CRAWLER_FACTORIES):
-    crawl_list = [factory() for factory in crawler_factories]
     success_status = {}
 
-    for crawl in crawl_list:
+    for factory in crawler_factories:
+        current_site = getattr(factory, "__name__", factory.__class__.__name__)
+        try:
+            crawl = factory()
+        except Exception as e:
+            logger.error(
+                f"Error - initializing real-time {current_site}: {str(e)}",
+                exc_info=True,
+            )
+            success_status[current_site] = "Fail"
+            continue
+
         if crawl is None:
-            logger.warning("Skipping null crawler in list.")
+            logger.warning(f"Skipping null crawler: {current_site}.")
+            success_status[current_site] = "Fail"
             continue
         try:
             current_site = crawl.__class__.__name__

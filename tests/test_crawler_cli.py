@@ -83,6 +83,39 @@ def test_snapshot_failure_is_logged_without_stopping_the_job(monkeypatch):
     ]
 
 
+def test_crawler_initialization_failure_does_not_stop_other_sites(monkeypatch):
+    from crawl_scheduler import main
+
+    calls = []
+
+    class FailingCrawler:
+        def __init__(self):
+            raise RuntimeError("database DNS unavailable")
+
+    class HealthyCrawler:
+        def get_realtime_best(self):
+            calls.append("healthy crawl")
+            return True
+
+    class FakeLogger:
+        def error(self, message, exc_info=False):
+            calls.append((message, exc_info))
+
+        def info(self, message):
+            calls.append(message)
+
+    monkeypatch.setattr(main, "logger", FakeLogger())
+
+    result = main.get_realtime_best((FailingCrawler, HealthyCrawler))
+
+    assert result == {"FailingCrawler": "Fail", "HealthyCrawler": "Success"}
+    assert (
+        "Error - initializing real-time FailingCrawler: database DNS unavailable",
+        True,
+    ) in calls
+    assert "healthy crawl" in calls
+
+
 def test_theqoo_board_list_skips_notice_rows_before_hot_posts(monkeypatch):
     from crawl_scheduler.community_website import theqoo
 

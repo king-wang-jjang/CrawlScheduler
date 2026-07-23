@@ -48,7 +48,10 @@ class Dcinside(AbstractCommunityWebsite):
 
                 gpt_obj_id = self.get_gpt_obj((entry.category, entry.no))
                 contents = self.get_board_contents(
-                    url=entry.url, category=entry.category, no=entry.no
+                    url=entry.url,
+                    category=entry.category,
+                    no=entry.no,
+                    created_at=entry.created_at,
                 )
 
                 document = {
@@ -191,7 +194,7 @@ class Dcinside(AbstractCommunityWebsite):
         except ValueError:
             return None  # 파싱 실패 시 None 반환
 
-    def get_board_contents(self, category= None, no=None, url=None):
+    def get_board_contents(self, category=None, no=None, url=None, created_at=None):
         content_list = []
         try:
             respone = requests.get(url, headers=self.g_headers[0], timeout=10)
@@ -211,7 +214,13 @@ class Dcinside(AbstractCommunityWebsite):
                     if not img_url:
                         continue
                     try:
-                        file_path = super().save_file(img_url, category=category, no=no, headers=self.g_headers[0])
+                        file_path = super().save_file(
+                            img_url,
+                            category=category,
+                            no=no,
+                            headers=self.g_headers[0],
+                            created_at=created_at,
+                        )
                         if not file_path:
                             continue
                         img_txt = super().img_to_text(os.path.join(Config().get_env('ROOT') or './media', file_path))
@@ -225,7 +234,12 @@ class Dcinside(AbstractCommunityWebsite):
                     if not video_url:
                         continue
                     try:
-                        file_path = super().save_file(video_url, category=category, no=no)
+                        file_path = super().save_file(
+                            video_url,
+                            category=category,
+                            no=no,
+                            created_at=created_at,
+                        )
                         if file_path:
                             block = video_block(media_path=file_path, source_url=video_url)
                             if block:

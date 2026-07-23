@@ -51,6 +51,12 @@ def test_crawler_writes_media_to_the_shared_container_directory():
     assert 'echo "ROOT=/app/public" >> .env' in workflow
 
 
+def test_crawler_container_restarts_after_transient_dependency_failure():
+    compose = COMPOSE_PATH.read_text(encoding="utf-8")
+
+    assert "restart: unless-stopped" in compose
+
+
 def test_deploy_recovers_media_before_removing_the_old_container():
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
 

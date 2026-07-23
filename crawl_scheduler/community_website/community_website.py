@@ -8,6 +8,7 @@ import requests
 from crawl_scheduler.config import Config
 from crawl_scheduler.crawled_content import is_usable_thumbnail_url
 from crawl_scheduler.ocr import extract_text_from_image
+from crawl_scheduler.media_paths import dated_post_directory
 from crawl_scheduler.utils.loghandler import logger
 
 
@@ -46,7 +47,15 @@ class AbstractCommunityWebsite(ABC):
     def get_board_list(self):
         pass
 
-    def save_file(self, url, category, no, alt_text=None, headers=None):
+    def save_file(
+        self,
+        url,
+        category,
+        no,
+        alt_text=None,
+        headers=None,
+        created_at=None,
+    ):
         try:
             media_url = self.normalize_media_url(url)
             if not media_url:
@@ -59,7 +68,13 @@ class AbstractCommunityWebsite(ABC):
             response = requests.get(media_url, headers=headers, stream=True, timeout=10)
             child_class_name = self.__class__.__name__
             root_path = Config().get_env("ROOT") or "./media"
-            path = os.path.join(root_path, child_class_name, str(category), str(no))
+            path = dated_post_directory(
+                root_path,
+                child_class_name,
+                category,
+                no,
+                created_at=created_at,
+            )
 
             logger.info("Saving media from URL: %s", media_url)
             os.makedirs(path, exist_ok=True)
