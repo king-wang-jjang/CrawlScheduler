@@ -1,4 +1,5 @@
 import os
+import time
 from datetime import datetime, timezone
 
 import requests
@@ -32,6 +33,7 @@ class PopularCommunityCrawler(AbstractCommunityWebsite):
 
     site = ""
     body_selectors = ()
+    request_delay_seconds = 0.0
 
     def __init__(self):
         self.db_controller = PostgresController()
@@ -56,6 +58,8 @@ class PopularCommunityCrawler(AbstractCommunityWebsite):
                     existing_posts.append((entry.category, entry.no))
                     continue
 
+                if self.request_delay_seconds:
+                    time.sleep(self.request_delay_seconds)
                 contents = self.get_board_contents(
                     url=entry.url,
                     category=entry.category,
@@ -91,13 +95,25 @@ class PopularCommunityCrawler(AbstractCommunityWebsite):
     def get_board_contents(self, category=None, no=None, url=None, created_at=None):
         if not url:
             return []
+        response = None
         try:
-            response = requests.get(
-                url,
-                headers=BROWSER_HEADERS,
-                proxies=self.request_proxies(),
-                timeout=15,
-            )
+            for attempt in range(3):
+                response = requests.get(
+                    url,
+                    headers=BROWSER_HEADERS,
+                    proxies=self.request_proxies(),
+                    timeout=15,
+                )
+                if response.status_code not in {429, 430} or attempt == 2:
+                    break
+                wait_seconds = max(self.request_delay_seconds, 1.0) * (2 ** attempt)
+                logger.warning(
+                    "%s throttled %s; retrying in %.1fs",
+                    self.site,
+                    url,
+                    wait_seconds,
+                )
+                time.sleep(wait_seconds)
             response.raise_for_status()
             html = getattr(response, "content", None) or response.text
             soup = BeautifulSoup(html, "html.parser")

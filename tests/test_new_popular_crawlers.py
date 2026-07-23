@@ -106,6 +106,7 @@ def test_new_popular_posts_enter_common_ai_queue(
     fake_db = FakeDB()
     monkeypatch.setattr(module, "PostgresController", lambda: fake_db)
     crawler = getattr(module, class_name)()
+    crawler.request_delay_seconds = 0
     entry = BoardListEntry(
         url=f"https://example.com/{no}",
         category=category,
@@ -137,3 +138,38 @@ def test_optional_proxy_is_used_for_popular_site_requests(monkeypatch):
         "http": "http://100.64.0.1:3128",
         "https": "http://100.64.0.1:3128",
     }
+
+
+def test_throttled_body_request_is_retried(monkeypatch):
+    from crawl_scheduler.community_website import popular_community
+    from crawl_scheduler.community_website.fmkorea import Fmkorea
+
+    class FakeResponse:
+        def __init__(self, status_code, html=""):
+            self.status_code = status_code
+            self.content = html.encode()
+            self.text = html
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(f"HTTP {self.status_code}")
+
+    responses = iter(
+        [
+            FakeResponse(430),
+            FakeResponse(200, '<div class="xe_content">본문</div>'),
+        ]
+    )
+    monkeypatch.setattr(
+        popular_community.requests,
+        "get",
+        lambda *args, **kwargs: next(responses),
+    )
+    monkeypatch.setattr(popular_community.time, "sleep", lambda seconds: None)
+    crawler = Fmkorea.__new__(Fmkorea)
+
+    contents = crawler.get_board_contents(
+        category="best", no=1, url="https://example.com/1"
+    )
+
+    assert contents == [{"type": "text", "text": "본문"}]

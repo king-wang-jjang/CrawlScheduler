@@ -18,6 +18,7 @@ class Fmkorea(PopularCommunityCrawler):
     site = SITE_FMKOREA
     list_url = "https://www.fmkorea.com/best"
     body_selectors = (".xe_content", ".rd_body")
+    request_delay_seconds = 1.0
 
     def __init__(self):
         self.db_controller = PostgresController()
