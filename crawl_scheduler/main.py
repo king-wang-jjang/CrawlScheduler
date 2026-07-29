@@ -61,6 +61,23 @@ def positive_minutes(value):
     return minutes
 
 
+def resolve_disabled_sites(crawler_specs=CRAWLER_SPECS):
+    raw_value = os.getenv("CRAWLER_DISABLED_SITES", "")
+    disabled_sites = frozenset(
+        site.strip().lower()
+        for site in raw_value.split(",")
+        if site.strip()
+    )
+    known_sites = {spec.site for spec in crawler_specs}
+    unknown_sites = disabled_sites - known_sites
+    if unknown_sites:
+        names = ", ".join(sorted(unknown_sites))
+        raise argparse.ArgumentTypeError(
+            f"CRAWLER_DISABLED_SITES contains unknown sites: {names}"
+        )
+    return disabled_sites
+
+
 def resolve_crawler_intervals(forced_interval=None, crawler_specs=CRAWLER_SPECS):
     if forced_interval is not None:
         return {spec.site: forced_interval for spec in crawler_specs}
@@ -132,8 +149,8 @@ def record_daily_top10_snapshot():
         logger.error(f"Error - daily Top10 snapshot: {str(e)}", exc_info=True)
 
 
-def job():
-    get_realtime_best()
+def job(crawler_factories=DEFAULT_CRAWLER_FACTORIES):
+    get_realtime_best(crawler_factories)
     record_daily_top10_snapshot()
 
 
@@ -182,7 +199,14 @@ def parse_args(argv=None):
     )
     args = parser.parse_args(argv)
     try:
-        args.crawler_intervals = resolve_crawler_intervals(args.interval_minutes)
+        args.disabled_sites = resolve_disabled_sites()
+        args.crawler_specs = tuple(
+            spec for spec in CRAWLER_SPECS if spec.site not in args.disabled_sites
+        )
+        args.crawler_intervals = resolve_crawler_intervals(
+            args.interval_minutes,
+            crawler_specs=args.crawler_specs,
+        )
     except argparse.ArgumentTypeError as exc:
         parser.error(str(exc))
     return args
@@ -190,15 +214,25 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
+    crawler_factories = tuple(spec.factory for spec in args.crawler_specs)
+    if args.disabled_sites:
+        logger.warning(
+            "Disabled crawlers: %s",
+            ", ".join(sorted(args.disabled_sites)),
+        )
 
     if args.once:
-        job()
+        job(crawler_factories)
         return 0
 
     if args.run_on_start:
-        job()
+        job(crawler_factories)
 
-    configure_schedule(schedule, args.crawler_intervals)
+    configure_schedule(
+        schedule,
+        args.crawler_intervals,
+        crawler_specs=args.crawler_specs,
+    )
 
     while True:
         schedule.run_pending()

@@ -57,6 +57,15 @@ def test_crawler_container_restarts_after_transient_dependency_failure():
     assert "restart: unless-stopped" in compose
 
 
+def test_deploy_disables_blocked_community_crawlers():
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert (
+        'echo "CRAWLER_DISABLED_SITES=fmkorea,theqoo,arca" >> .env'
+        in workflow
+    )
+
+
 def test_deploy_recovers_media_before_removing_the_old_container():
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
 

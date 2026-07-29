@@ -24,6 +24,8 @@ CRAWLER_INTERVAL_MINUTES=5
 CRAWLER_ARCA_INTERVAL_MINUTES=10
 CRAWLER_THEQOO_INTERVAL_MINUTES=15
 CRAWLER_FMKOREA_INTERVAL_MINUTES=30
+# 임시 수집 중지 목록
+CRAWLER_DISABLED_SITES=fmkorea,theqoo,arca
 # 데이터센터 IP가 차단될 때만 사용하는 선택값
 CRAWLER_HTTP_PROXY=http://<private-proxy-host>:3128
 ```
@@ -33,6 +35,10 @@ CRAWLER_HTTP_PROXY=http://<private-proxy-host>:3128
 `CRAWLER_INTERVAL_MINUTES`보다 우선합니다. 명령행의 `--interval-minutes`는
 테스트용으로 모든 사이트를 같은 값으로 강제하며 모든 환경변수보다 우선합니다.
 주기는 1분 이상의 정수만 허용합니다.
+
+`CRAWLER_DISABLED_SITES`에 쉼표로 구분한 사이트를 지정하면 반복 스케줄과
+`--once` 실행에서 모두 제외됩니다. 현재 운영에서는 원문 접근이 차단된
+에펨코리아·더쿠·아카라이브를 임시 중지하고 나머지 네 사이트만 수집합니다.
 
 HTTP 429/430 응답을 받은 사이트는 `Retry-After` 동안 추가 요청하지 않고 해당
 사이트의 현재 수집만 중단합니다. 차단된 본문은 빈 게시물로 저장하지 않으며 다른

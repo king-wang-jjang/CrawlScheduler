@@ -33,11 +33,18 @@ def test_once_flag_runs_crawl_and_exits(monkeypatch):
         def record_daily_top10_snapshot(self):
             calls.append("snapshot")
 
-    monkeypatch.setattr(main, "get_realtime_best", lambda: calls.append("crawl"))
+    monkeypatch.setattr(
+        main,
+        "get_realtime_best",
+        lambda factories: calls.append(("crawl", tuple(factories))),
+    )
     monkeypatch.setattr(main, "PostgresController", FakeDB)
 
     assert main.main(["--once"]) == 0
-    assert calls == ["crawl", "snapshot"]
+    assert calls == [
+        ("crawl", main.DEFAULT_CRAWLER_FACTORIES),
+        "snapshot",
+    ]
 
 
 def test_seed_alias_runs_crawl_and_exits(monkeypatch):
@@ -49,11 +56,79 @@ def test_seed_alias_runs_crawl_and_exits(monkeypatch):
         def record_daily_top10_snapshot(self):
             calls.append("snapshot")
 
-    monkeypatch.setattr(main, "get_realtime_best", lambda: calls.append("crawl"))
+    monkeypatch.setattr(
+        main,
+        "get_realtime_best",
+        lambda factories: calls.append(("crawl", tuple(factories))),
+    )
     monkeypatch.setattr(main, "PostgresController", FakeDB)
 
     assert main.main(["--seed"]) == 0
-    assert calls == ["crawl", "snapshot"]
+    assert calls == [
+        ("crawl", main.DEFAULT_CRAWLER_FACTORIES),
+        "snapshot",
+    ]
+
+
+def test_disabled_sites_are_excluded_from_once_and_repeating_jobs(monkeypatch):
+    import schedule
+
+    from crawl_scheduler import main
+
+    monkeypatch.setenv("CRAWLER_DISABLED_SITES", "fmkorea, theqoo, arca")
+    args = main.parse_args([])
+    enabled_sites = {spec.site for spec in args.crawler_specs}
+
+    assert args.disabled_sites == frozenset({"fmkorea", "theqoo", "arca"})
+    assert enabled_sites == {"ygosu", "ppomppu", "dcinside", "inven"}
+
+    once_calls = []
+
+    class FakeDB:
+        def record_daily_top10_snapshot(self):
+            once_calls.append("snapshot")
+
+    monkeypatch.setattr(
+        main,
+        "get_realtime_best",
+        lambda factories: once_calls.append(
+            tuple(factory.__name__ for factory in factories)
+        ),
+    )
+    monkeypatch.setattr(main, "PostgresController", FakeDB)
+
+    assert main.main(["--once"]) == 0
+    assert once_calls == [
+        ("Ygosu", "Ppomppu", "Dcinside", "Inven"),
+        "snapshot",
+    ]
+
+    scheduler = schedule.Scheduler()
+    main.configure_schedule(
+        scheduler,
+        args.crawler_intervals,
+        crawler_specs=args.crawler_specs,
+    )
+
+    assert {
+        next(iter(job.tags))
+        for job in scheduler.jobs
+        if any(tag.startswith("crawler:") for tag in job.tags)
+    } == {
+        "crawler:ygosu",
+        "crawler:ppomppu",
+        "crawler:dcinside",
+        "crawler:inven",
+    }
+
+
+def test_unknown_disabled_site_is_rejected(monkeypatch):
+    from crawl_scheduler import main
+
+    monkeypatch.setenv("CRAWLER_DISABLED_SITES", "fmkorea,typo")
+
+    with pytest.raises(SystemExit):
+        main.parse_args([])
 
 
 def test_recommended_site_intervals_are_used_by_default(monkeypatch):
@@ -203,14 +278,18 @@ def test_snapshot_failure_is_logged_without_stopping_the_job(monkeypatch):
         def error(self, message, exc_info=False):
             calls.append((message, exc_info))
 
-    monkeypatch.setattr(main, "get_realtime_best", lambda: calls.append("crawl"))
+    monkeypatch.setattr(
+        main,
+        "get_realtime_best",
+        lambda factories: calls.append(("crawl", tuple(factories))),
+    )
     monkeypatch.setattr(main, "PostgresController", FailingDB)
     monkeypatch.setattr(main, "logger", FakeLogger())
 
     main.job()
 
     assert calls == [
-        "crawl",
+        ("crawl", main.DEFAULT_CRAWLER_FACTORIES),
         "snapshot",
         ("Error - daily Top10 snapshot: database unavailable", True),
     ]

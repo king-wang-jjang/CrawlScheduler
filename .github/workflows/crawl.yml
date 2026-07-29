@@ -106,6 +106,7 @@ jobs:
           echo "CRAWLER_ARCA_INTERVAL_MINUTES=10" >> .env
           echo "CRAWLER_THEQOO_INTERVAL_MINUTES=15" >> .env
           echo "CRAWLER_FMKOREA_INTERVAL_MINUTES=30" >> .env
+          echo "CRAWLER_DISABLED_SITES=fmkorea,theqoo,arca" >> .env
           echo "CRAWLER_HTTP_PROXY=${{ secrets.CRAWLER_HTTP_PROXY }}" >> .env
           echo "CHATGPT_API_KEY=${{ secrets.CHATGPT_API_KEY }}" >> .env
           echo "FTP_HOST=${{ secrets.FTP_HOST }}" >> .env
