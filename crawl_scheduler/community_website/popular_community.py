@@ -1,6 +1,8 @@
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from math import ceil
 import os
 import time
-from datetime import datetime, timezone
 
 import requests
 from bs4 import BeautifulSoup
@@ -26,6 +28,36 @@ BROWSER_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.7,en;q=0.6",
 }
+DEFAULT_RETRY_AFTER_SECONDS = 300
+
+
+class CrawlerThrottledError(RuntimeError):
+    def __init__(self, site, url, status_code, retry_after_seconds):
+        self.site = site
+        self.url = url
+        self.status_code = status_code
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__(
+            f"{site} throttled HTTP {status_code}; "
+            f"retry after {retry_after_seconds}s: {url}"
+        )
+
+
+def retry_after_seconds(response):
+    value = (getattr(response, "headers", {}) or {}).get("Retry-After")
+    if value:
+        try:
+            return max(int(value), 1)
+        except (TypeError, ValueError):
+            try:
+                retry_at = parsedate_to_datetime(value)
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=timezone.utc)
+                seconds = (retry_at - datetime.now(timezone.utc)).total_seconds()
+                return max(ceil(seconds), 1)
+            except (AttributeError, TypeError, ValueError, OverflowError):
+                pass
+    return DEFAULT_RETRY_AFTER_SECONDS
 
 
 class PopularCommunityCrawler(AbstractCommunityWebsite):
@@ -34,6 +66,7 @@ class PopularCommunityCrawler(AbstractCommunityWebsite):
     site = ""
     body_selectors = ()
     request_delay_seconds = 0.0
+    _cooldown_until_by_site = {}
 
     def __init__(self):
         self.db_controller = PostgresController()
@@ -43,7 +76,11 @@ class PopularCommunityCrawler(AbstractCommunityWebsite):
 
     def get_realtime_best(self):
         existing_posts = []
-        board_entries = self.get_board_entries()
+        try:
+            board_entries = self.get_board_entries()
+        except CrawlerThrottledError as exc:
+            logger.warning("%s; stopping this crawl cycle", exc)
+            return False
         if not board_entries:
             logger.error("%s popular feed returned no posts", self.site)
             return False
@@ -78,7 +115,15 @@ class PopularCommunityCrawler(AbstractCommunityWebsite):
                         **entry.metrics_dict(),
                     },
                 )
-                logger.info("Post %s/%s/%s inserted successfully", self.site, entry.category, entry.no)
+                logger.info(
+                    "Post %s/%s/%s inserted successfully",
+                    self.site,
+                    entry.category,
+                    entry.no,
+                )
+            except CrawlerThrottledError as exc:
+                logger.warning("%s; stopping this crawl cycle", exc)
+                return False
             except Exception as exc:
                 logger.error(
                     "Error saving %s/%s/%s: %s", self.site, entry.category, entry.no, exc
@@ -95,28 +140,13 @@ class PopularCommunityCrawler(AbstractCommunityWebsite):
     def get_board_contents(self, category=None, no=None, url=None, created_at=None):
         if not url:
             return []
-        response = None
         try:
-            for attempt in range(3):
-                response = requests.get(
-                    url,
-                    headers=BROWSER_HEADERS,
-                    proxies=self.request_proxies(),
-                    timeout=15,
-                )
-                if response.status_code not in {429, 430} or attempt == 2:
-                    break
-                wait_seconds = max(self.request_delay_seconds, 1.0) * (2 ** attempt)
-                logger.warning(
-                    "%s throttled %s; retrying in %.1fs",
-                    self.site,
-                    url,
-                    wait_seconds,
-                )
-                time.sleep(wait_seconds)
+            response = self.get_response(url)
             response.raise_for_status()
             html = getattr(response, "content", None) or response.text
             soup = BeautifulSoup(html, "html.parser")
+        except CrawlerThrottledError:
+            raise
         except Exception as exc:
             logger.error("Error fetching %s body %s: %s", self.site, url, exc)
             return []
@@ -185,16 +215,47 @@ class PopularCommunityCrawler(AbstractCommunityWebsite):
         return False
 
     @classmethod
-    def soup_from_url(cls, url):
+    def get_response(cls, url):
+        cooldown_remaining = cls.cooldown_remaining_seconds()
+        if cooldown_remaining:
+            raise CrawlerThrottledError(
+                cls.site,
+                url,
+                "cooldown",
+                cooldown_remaining,
+            )
         response = requests.get(
             url,
             headers=BROWSER_HEADERS,
             proxies=cls.request_proxies(),
             timeout=15,
         )
+        if getattr(response, "status_code", None) in {429, 430}:
+            retry_seconds = retry_after_seconds(response)
+            cls._cooldown_until_by_site[cls.site] = time.monotonic() + retry_seconds
+            raise CrawlerThrottledError(
+                cls.site,
+                url,
+                response.status_code,
+                retry_seconds,
+            )
+        return response
+
+    @classmethod
+    def soup_from_url(cls, url):
+        response = cls.get_response(url)
         response.raise_for_status()
         html = getattr(response, "content", None) or response.text
         return BeautifulSoup(html, "html.parser")
+
+    @classmethod
+    def cooldown_remaining_seconds(cls):
+        cooldown_until = cls._cooldown_until_by_site.get(cls.site, 0)
+        remaining = ceil(cooldown_until - time.monotonic())
+        if remaining <= 0:
+            cls._cooldown_until_by_site.pop(cls.site, None)
+            return 0
+        return remaining
 
     @staticmethod
     def utc_now():

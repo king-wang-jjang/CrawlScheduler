@@ -140,36 +140,111 @@ def test_optional_proxy_is_used_for_popular_site_requests(monkeypatch):
     }
 
 
-def test_throttled_body_request_is_retried(monkeypatch):
+def test_throttled_body_request_stops_without_immediate_retry(monkeypatch):
     from crawl_scheduler.community_website import popular_community
     from crawl_scheduler.community_website.fmkorea import Fmkorea
 
     class FakeResponse:
-        def __init__(self, status_code, html=""):
-            self.status_code = status_code
-            self.content = html.encode()
-            self.text = html
+        status_code = 430
+        headers = {"Retry-After": "300"}
+        content = b"blocked"
+        text = "blocked"
 
-        def raise_for_status(self):
-            if self.status_code >= 400:
-                raise RuntimeError(f"HTTP {self.status_code}")
-
-    responses = iter(
-        [
-            FakeResponse(430),
-            FakeResponse(200, '<div class="xe_content">본문</div>'),
-        ]
-    )
+    calls = []
     monkeypatch.setattr(
         popular_community.requests,
         "get",
-        lambda *args, **kwargs: next(responses),
+        lambda *args, **kwargs: calls.append((args, kwargs)) or FakeResponse(),
     )
-    monkeypatch.setattr(popular_community.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        popular_community.PopularCommunityCrawler,
+        "_cooldown_until_by_site",
+        {},
+    )
     crawler = Fmkorea.__new__(Fmkorea)
 
-    contents = crawler.get_board_contents(
-        category="best", no=1, url="https://example.com/1"
+    with pytest.raises(popular_community.CrawlerThrottledError) as error:
+        crawler.get_board_contents(
+            category="best", no=1, url="https://example.com/1"
+        )
+
+    assert error.value.retry_after_seconds == 300
+    assert len(calls) == 1
+
+
+def test_throttled_site_does_not_request_again_during_retry_after(monkeypatch):
+    from crawl_scheduler.community_website import popular_community
+    from crawl_scheduler.community_website.fmkorea import Fmkorea
+
+    class FakeResponse:
+        status_code = 430
+        headers = {"Retry-After": "300"}
+
+    calls = []
+    monkeypatch.setattr(
+        popular_community.requests,
+        "get",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or FakeResponse(),
+    )
+    monkeypatch.setattr(
+        popular_community.PopularCommunityCrawler,
+        "_cooldown_until_by_site",
+        {},
     )
 
-    assert contents == [{"type": "text", "text": "본문"}]
+    with pytest.raises(popular_community.CrawlerThrottledError):
+        Fmkorea.get_response("https://example.com/first")
+    with pytest.raises(popular_community.CrawlerThrottledError) as error:
+        Fmkorea.get_response("https://example.com/second")
+
+    assert error.value.status_code == "cooldown"
+    assert 1 <= error.value.retry_after_seconds <= 300
+    assert len(calls) == 1
+
+
+def test_throttled_new_post_is_not_inserted_and_stops_site_cycle(monkeypatch):
+    from crawl_scheduler.community_website.board_list_entry import BoardListEntry
+    from crawl_scheduler.community_website.fmkorea import Fmkorea
+    from crawl_scheduler.community_website.popular_community import (
+        CrawlerThrottledError,
+    )
+
+    class FakeDB:
+        def __init__(self):
+            self.documents = []
+
+        def find(self, *args):
+            return []
+
+        def insert_one(self, collection, document):
+            self.documents.append(document)
+
+    crawler = Fmkorea.__new__(Fmkorea)
+    crawler.db_controller = FakeDB()
+    crawler.request_delay_seconds = 0
+    entries = [
+        BoardListEntry(
+            url=f"https://example.com/{no}",
+            category="best",
+            no=no,
+            title=f"post {no}",
+            created_at=datetime.now(ZoneInfo("Asia/Seoul")),
+            native_comment_count=0,
+            native_like_count=0,
+            native_view_count=0,
+            source_rank=no,
+        )
+        for no in (1, 2)
+    ]
+    body_calls = []
+    monkeypatch.setattr(crawler, "get_board_entries", lambda: entries)
+
+    def throttle_first_body(**kwargs):
+        body_calls.append(kwargs["no"])
+        raise CrawlerThrottledError("fmkorea", kwargs["url"], 430, 300)
+
+    monkeypatch.setattr(crawler, "get_board_contents", throttle_first_body)
+
+    assert crawler.get_realtime_best() is False
+    assert body_calls == [1]
+    assert crawler.db_controller.documents == []

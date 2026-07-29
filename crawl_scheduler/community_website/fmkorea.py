@@ -8,7 +8,10 @@ from crawl_scheduler.community_website.board_list_entry import (
     parse_native_count,
     recent_source_datetime,
 )
-from crawl_scheduler.community_website.popular_community import PopularCommunityCrawler
+from crawl_scheduler.community_website.popular_community import (
+    CrawlerThrottledError,
+    PopularCommunityCrawler,
+)
 from crawl_scheduler.constants import SITE_FMKOREA
 from crawl_scheduler.db.postgres_controller import PostgresController
 from crawl_scheduler.utils.loghandler import logger
@@ -18,7 +21,7 @@ class Fmkorea(PopularCommunityCrawler):
     site = SITE_FMKOREA
     list_url = "https://www.fmkorea.com/best"
     body_selectors = (".xe_content", ".rd_body")
-    request_delay_seconds = 1.0
+    request_delay_seconds = 3.0
 
     def __init__(self):
         self.db_controller = PostgresController()
@@ -26,6 +29,8 @@ class Fmkorea(PopularCommunityCrawler):
     def get_board_entries(self):
         try:
             soup = self.soup_from_url(self.list_url)
+        except CrawlerThrottledError:
+            raise
         except Exception as exc:
             logger.error("Get FMKorea list error: %s", exc)
             return []

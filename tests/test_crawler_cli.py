@@ -56,6 +56,139 @@ def test_seed_alias_runs_crawl_and_exits(monkeypatch):
     assert calls == ["crawl", "snapshot"]
 
 
+def test_recommended_site_intervals_are_used_by_default(monkeypatch):
+    from crawl_scheduler import main
+
+    for name in (
+        "CRAWLER_INTERVAL_MINUTES",
+        "CRAWLER_ARCA_INTERVAL_MINUTES",
+        "CRAWLER_THEQOO_INTERVAL_MINUTES",
+        "CRAWLER_FMKOREA_INTERVAL_MINUTES",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    args = main.parse_args([])
+
+    assert args.crawler_intervals == {
+        "ygosu": 5,
+        "ppomppu": 5,
+        "theqoo": 15,
+        "dcinside": 5,
+        "fmkorea": 30,
+        "arca": 10,
+        "inven": 5,
+    }
+
+
+def test_global_interval_environment_overrides_recommended_defaults(monkeypatch):
+    from crawl_scheduler import main
+
+    monkeypatch.setenv("CRAWLER_INTERVAL_MINUTES", "12")
+
+    assert set(main.parse_args([]).crawler_intervals.values()) == {12}
+
+
+def test_site_interval_environment_only_overrides_that_site(monkeypatch):
+    from crawl_scheduler import main
+
+    monkeypatch.setenv("CRAWLER_ARCA_INTERVAL_MINUTES", "20")
+
+    intervals = main.parse_args([]).crawler_intervals
+
+    assert intervals["arca"] == 20
+    assert intervals["theqoo"] == 15
+    assert intervals["fmkorea"] == 30
+
+
+def test_interval_minutes_cli_option_forces_every_site(monkeypatch):
+    from crawl_scheduler import main
+
+    monkeypatch.setenv("CRAWLER_INTERVAL_MINUTES", "15")
+    monkeypatch.setenv("CRAWLER_FMKOREA_INTERVAL_MINUTES", "60")
+
+    args = main.parse_args(["--interval-minutes", "30"])
+
+    assert args.interval_minutes == 30
+    assert set(args.crawler_intervals.values()) == {30}
+
+
+@pytest.mark.parametrize(
+    ("environment_name", "value"),
+    [
+        ("CRAWLER_INTERVAL_MINUTES", "0"),
+        ("CRAWLER_INTERVAL_MINUTES", "-1"),
+        ("CRAWLER_INTERVAL_MINUTES", "invalid"),
+        ("CRAWLER_THEQOO_INTERVAL_MINUTES", "1.5"),
+    ],
+)
+def test_interval_minutes_rejects_invalid_environment_values(
+    monkeypatch, environment_name, value
+):
+    from crawl_scheduler import main
+
+    monkeypatch.setenv(environment_name, value)
+
+    with pytest.raises(SystemExit):
+        main.parse_args([])
+
+
+def test_repeating_scheduler_registers_each_site_and_one_snapshot_job():
+    import schedule
+
+    from crawl_scheduler import main
+
+    scheduler = schedule.Scheduler()
+    intervals = {
+        spec.site: spec.default_interval_minutes for spec in main.CRAWLER_SPECS
+    }
+
+    main.configure_schedule(scheduler, intervals)
+
+    jobs_by_tag = {
+        next(iter(job.tags)): job
+        for job in scheduler.jobs
+    }
+    assert len(jobs_by_tag) == len(main.CRAWLER_SPECS) + 1
+    assert jobs_by_tag["crawler:arca"].interval == 10
+    assert jobs_by_tag["crawler:theqoo"].interval == 15
+    assert jobs_by_tag["crawler:fmkorea"].interval == 30
+    assert jobs_by_tag["snapshot"].interval == 5
+
+
+def test_scheduled_site_job_runs_only_its_factory(monkeypatch):
+    import schedule
+
+    from crawl_scheduler import main
+
+    calls = []
+
+    class FirstCrawler:
+        pass
+
+    class SecondCrawler:
+        pass
+
+    specs = (
+        main.CrawlerSpec("first", FirstCrawler, 5),
+        main.CrawlerSpec("second", SecondCrawler, 10),
+    )
+    scheduler = schedule.Scheduler()
+    monkeypatch.setattr(
+        main,
+        "get_realtime_best",
+        lambda factories: calls.append(tuple(factories)),
+    )
+
+    main.configure_schedule(
+        scheduler,
+        {"first": 5, "second": 10},
+        crawler_specs=specs,
+    )
+    next(job for job in scheduler.jobs if "crawler:second" in job.tags).run()
+
+    assert calls == [(SecondCrawler,)]
+
+
 def test_snapshot_failure_is_logged_without_stopping_the_job(monkeypatch):
     from crawl_scheduler import main
 
@@ -146,7 +279,11 @@ def test_theqoo_board_list_skips_notice_rows_before_hot_posts(monkeypatch):
             return None
 
     monkeypatch.setattr(theqoo, "PostgresController", lambda: FakeDB())
-    monkeypatch.setattr(theqoo.requests, "get", lambda *args, **kwargs: FakeResponse())
+    monkeypatch.setattr(
+        theqoo.Theqoo,
+        "get_response",
+        lambda *args, **kwargs: FakeResponse(),
+    )
 
     crawler = theqoo.Theqoo()
     entries = crawler.get_board_entries()

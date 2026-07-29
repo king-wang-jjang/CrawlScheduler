@@ -2,7 +2,6 @@ from datetime import datetime
 from urllib.parse import urljoin, urlparse
 from zoneinfo import ZoneInfo
 
-import requests
 from bs4 import BeautifulSoup
 
 from crawl_scheduler.community_website.board_list_entry import (
@@ -11,7 +10,7 @@ from crawl_scheduler.community_website.board_list_entry import (
     recent_source_datetime,
 )
 from crawl_scheduler.community_website.popular_community import (
-    BROWSER_HEADERS,
+    CrawlerThrottledError,
     PopularCommunityCrawler,
 )
 from crawl_scheduler.constants import SITE_THEQOO
@@ -23,21 +22,19 @@ class Theqoo(PopularCommunityCrawler):
     site = SITE_THEQOO
     list_url = "https://theqoo.net/hot?filter_mode=normal"
     body_selectors = (".xe_content", ".rd_body")
+    request_delay_seconds = 1.0
 
     def __init__(self):
         self.db_controller = PostgresController()
 
     def get_board_entries(self):
         try:
-            response = requests.get(
-                self.list_url,
-                headers=BROWSER_HEADERS,
-                proxies=self.request_proxies(),
-                timeout=15,
-            )
+            response = self.get_response(self.list_url)
             response.raise_for_status()
             html = getattr(response, "content", None) or response.text
             soup = BeautifulSoup(html, "html.parser")
+        except CrawlerThrottledError:
+            raise
         except Exception as exc:
             logger.error("Get Theqoo HOT list error: %s", exc)
             return []
