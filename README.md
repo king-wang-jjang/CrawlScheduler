@@ -48,5 +48,26 @@ HTTP 429/430 응답을 받은 사이트는 `Retry-After` 동안 추가 요청하
 `/mnt/kingwangjjang`)에 저장됩니다. 게시글 미디어는 사이트/게시판/연/월/일/글 번호로
 분산해 단일 디렉터리의 엔트리 수가 과도하게 증가하지 않도록 합니다.
 
+## 저장 데이터 품질 감사
+
+운영 DB의 게시글이 AI 분석에 충분한지 사이트별 JSON으로 확인할 수 있습니다. 이
+명령은 `boards`를 읽기만 하며 스키마나 데이터를 변경하지 않습니다.
+
+```bash
+poetry run python scripts/audit_content_quality.py --pretty
+```
+
+`sufficient_body`는 본문 판정 기준을 통과한 수, `needs_refresh`와
+`title_only_or_insufficient`는 본문이 부족한 수입니다. `image_recoverable`은
+`sufficient_body` 중 `ROOT` 아래에 실제로 존재하고 읽을 수 있는 로컬 이미지로
+복구 가능한 글의 부분집합입니다. 기본 출력은 CI에서 처리하기 쉬운 한 줄 JSON이며
+`--pretty`를 지정하면 들여씁니다.
+
+본문 기준은 `AI_ANALYSIS_MIN_BODY_CHARS`(기본 20)와
+`AI_ANALYSIS_MIN_LANGUAGE_CHARS`(기본 4)로 board-service와 동일하게 맞춥니다.
+기준 미달 글은 인기 목록에 다시 노출될 때 본문을 복구하되,
+`CONTENT_REFRESH_COOLDOWN_SECONDS`(기본 900초) 동안 반복 요청을 쉬고 복구
+과정에서는 영상을 다시 내려받지 않아 고아 미디어가 쌓이지 않게 합니다.
+
 사이트별 수집 범위와 AI 요약 흐름, 운영 점검 SQL은
 [docs/SITE_COVERAGE.md](docs/SITE_COVERAGE.md)를 참고하세요.

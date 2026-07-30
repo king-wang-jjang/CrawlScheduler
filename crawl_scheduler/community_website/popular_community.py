@@ -7,15 +7,12 @@ import time
 import requests
 from bs4 import BeautifulSoup
 
-from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
-from crawl_scheduler.config import Config
-from crawl_scheduler.constants import DEFAULT_GPT_ANSWER
-from crawl_scheduler.crawled_content import (
-    image_block,
-    metadata_image_block,
-    text_block,
-    video_block,
+from crawl_scheduler.community_website.article_content import (
+    build_ordered_content_blocks,
 )
+from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
+from crawl_scheduler.constants import DEFAULT_GPT_ANSWER
+from crawl_scheduler.crawled_content import metadata_image_block
 from crawl_scheduler.db.postgres_controller import PostgresController
 from crawl_scheduler.utils.loghandler import logger
 
@@ -92,6 +89,23 @@ class PopularCommunityCrawler(AbstractCommunityWebsite):
                     self.db_controller.refresh_native_metrics(
                         "Realtime", query, entry.metrics_dict()
                     )
+                    if self.db_controller.needs_content_refresh("Realtime", query):
+                        if self.request_delay_seconds:
+                            time.sleep(self.request_delay_seconds)
+                        contents = self.get_board_contents(
+                            url=entry.url,
+                            category=entry.category,
+                            no=entry.no,
+                            created_at=entry.created_at,
+                            save_videos=False,
+                        )
+                        self.db_controller.refresh_crawled_content(
+                            "Realtime",
+                            query,
+                            contents,
+                            title=entry.title,
+                            url=entry.url,
+                        )
                     existing_posts.append((entry.category, entry.no))
                     continue
 
@@ -137,7 +151,14 @@ class PopularCommunityCrawler(AbstractCommunityWebsite):
             for entry in self.get_board_entries()
         ]
 
-    def get_board_contents(self, category=None, no=None, url=None, created_at=None):
+    def get_board_contents(
+        self,
+        category=None,
+        no=None,
+        url=None,
+        created_at=None,
+        save_videos=True,
+    ):
         if not url:
             return []
         try:
@@ -151,7 +172,14 @@ class PopularCommunityCrawler(AbstractCommunityWebsite):
             logger.error("Error fetching %s body %s: %s", self.site, url, exc)
             return []
 
-        body = next((soup.select_one(selector) for selector in self.body_selectors if soup.select_one(selector)), None)
+        body = next(
+            (
+                selected_body
+                for selector in self.body_selectors
+                if (selected_body := soup.select_one(selector)) is not None
+            ),
+            None,
+        )
         if body is None:
             logger.warning("Could not find %s article body: %s", self.site, url)
             return []
@@ -160,52 +188,19 @@ class PopularCommunityCrawler(AbstractCommunityWebsite):
         metadata = metadata_image_block(self.metadata_image_url_from_soup(soup, base_url=url))
         if metadata:
             contents.append(metadata)
-
-        body_copy = BeautifulSoup(str(body), "html.parser")
-        for unwanted in body_copy.select("script, style, noscript"):
-            unwanted.decompose()
-        block = text_block(body_copy.get_text("\n", strip=True))
-        if block:
-            contents.append(block)
-
-        seen_urls = set()
-        for tag in body.select("img, video, video source"):
-            media_url = self.media_url_from_tag(tag, base_url=url)
-            if not media_url or media_url in seen_urls:
-                continue
-            seen_urls.add(media_url)
-            media_type = "video" if tag.name in {"video", "source"} else "image"
-            file_path = self.save_file(
-                media_url,
+        contents.extend(
+            build_ordered_content_blocks(
+                self,
+                body,
+                base_url=url,
                 category=category,
                 no=no,
-                alt_text=tag.get("alt"),
-                headers={**BROWSER_HEADERS, "Referer": url},
                 created_at=created_at,
+                headers={**BROWSER_HEADERS, "Referer": url},
                 proxies=self.request_proxies(),
+                save_videos=save_videos,
             )
-            if not file_path:
-                continue
-            if media_type == "video":
-                media_block = video_block(media_path=file_path, source_url=media_url)
-            else:
-                alt_text = tag.get("alt")
-                ocr_text = alt_text
-                if not ocr_text:
-                    try:
-                        ocr_text = self.img_to_text(
-                            os.path.join(Config().get_env("ROOT") or "./media", file_path)
-                        )
-                    except Exception as exc:
-                        logger.warning("OCR skipped for %s: %s", media_url, exc)
-                media_block = image_block(
-                    media_path=file_path,
-                    source_url=media_url,
-                    text=ocr_text,
-                    alt_text=alt_text,
-                )
-            if media_block:
-                contents.append(media_block)
+        )
         return contents
 
     def get_gpt_obj(self, board_id):

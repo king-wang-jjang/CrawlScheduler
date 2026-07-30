@@ -1,17 +1,14 @@
 from datetime import datetime, timezone
-import os
 from typing import Tuple
 from bs4 import BeautifulSoup
 import requests
-from crawl_scheduler.config import Config
-from crawl_scheduler.crawled_content import image_block, metadata_image_block, text_block, video_block
+from crawl_scheduler.crawled_content import metadata_image_block
 from crawl_scheduler.db.postgres_controller import PostgresController
+from crawl_scheduler.community_website.article_content import build_ordered_content_blocks
 from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
 from crawl_scheduler.community_website.board_list_entry import BoardListEntry, parse_native_count, recent_source_datetime
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_YGOSU, DEFAULT_TAG
 from crawl_scheduler.utils.loghandler import logger
-import sys
-import uuid
 
 class Ygosu(AbstractCommunityWebsite):
     def __init__(self):
@@ -85,6 +82,20 @@ class Ygosu(AbstractCommunityWebsite):
                     self.db_controller.refresh_native_metrics(
                         'Realtime', query, entry.metrics_dict()
                     )
+                    if self.db_controller.needs_content_refresh('Realtime', query):
+                        contents = self.get_board_contents(
+                            url=entry.url,
+                            category=entry.category,
+                            no=entry.no,
+                            save_videos=False,
+                        )
+                        self.db_controller.refresh_crawled_content(
+                            'Realtime',
+                            query,
+                            contents,
+                            title=entry.title,
+                            url=entry.url,
+                        )
                     already_exists_post.append((entry.category, entry.no))
                     continue
 
@@ -113,7 +124,13 @@ class Ygosu(AbstractCommunityWebsite):
 
         return True
 
-    def get_board_contents(self, category=None, no=None, url=None):
+    def get_board_contents(
+        self,
+        category=None,
+        no=None,
+        url=None,
+        save_videos=True,
+    ):
         content_list = []
         if url:
             try:
@@ -128,54 +145,22 @@ class Ygosu(AbstractCommunityWebsite):
                 board_body = soup.find('div', class_='container')
                 if not board_body:
                     return content_list
-                seen_media_urls = set()
-
-                for element in board_body.find_all(['p', 'div'], recursive=True):  # <p>와 <div> 순회
-                    img = element.find('img')
-                    if img and 'src' in img.attrs:  # 이미지 처리
-                        img_url = super().media_url_from_tag(img, base_url=url)
-                        if not img_url or img_url in seen_media_urls:
-                            continue
-                        seen_media_urls.add(img_url)
-                        try:
-                            filename = str(uuid.uuid4())
-                            file_path = super().save_file(img_url, category=category, no=no, alt_text=filename)
-                            if not file_path:
-                                continue
-                            img_txt = super().img_to_text(os.path.join(Config().get_env('ROOT') or './media', file_path))
-                            block = image_block(media_path=file_path, source_url=img_url, text=img_txt)
-                            if block:
-                                content_list.append(block)
-                        except Exception as e:
-                            logger.error(f"Error processing image {img_url}: {e}")
-                    video = element.find('video')
-                    if video:  # 비디오 처리
-                        source = video.find('source')
-                        if source and 'src' in source.attrs:
-                            video_url = super().media_url_from_tag(source, base_url=url)
-                            if not video_url or video_url in seen_media_urls:
-                                continue
-                            seen_media_urls.add(video_url)
-                            try:
-                                file_path = super().save_file(video_url, category=category, no=no)  # 비디오 저장
-                                if file_path:
-                                    block = video_block(media_path=file_path, source_url=video_url)
-                                    if block:
-                                        content_list.append(block)
-                            except Exception as e:
-                                logger.error(f"Error processing video {video_url}: {e}")
-                    text = element.text.strip()
-                    block = text_block(text)
-                    if block:
-                        content_list.append(block)
+                content_list.extend(
+                    build_ordered_content_blocks(
+                        self,
+                        board_body,
+                        base_url=url,
+                        category=category,
+                        no=no,
+                        save_file=super().save_file,
+                        save_videos=save_videos,
+                    )
+                )
             
             except Exception as e:
                 logger.error(f"Error fetching board contents for {no}: {e}")
 
         return content_list
-    
-    def save_file(self, url):
-        pass
     
     def get_category_and_no(self, url) -> Tuple[str, int]:
         parts = url.split('/')

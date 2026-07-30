@@ -557,6 +557,9 @@ def test_existing_posts_refresh_metrics_without_fetching_body(
         def refresh_native_metrics(self, *args):
             self.refresh_calls.append(args)
 
+        def needs_content_refresh(self, *args):
+            return False
+
         def insert_one(self, *args, **kwargs):
             pytest.fail("existing posts must not be inserted again")
 
@@ -590,6 +593,104 @@ def test_existing_posts_refresh_metrics_without_fetching_body(
             "Realtime",
             {"site": site, "category": category, "no": no},
             metrics,
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("module_name", "class_name", "site", "category", "no"),
+    [
+        ("ygosu", "Ygosu", "ygosu", "yeobgi", 151),
+        ("ppomppu", "Ppomppu", "ppomppu", "freeboard", 152),
+        ("theqoo", "Theqoo", "theqoo", "hot", 153),
+        ("dcinside", "Dcinside", "dcinside", "dcbest", 154),
+    ],
+)
+def test_existing_posts_with_insufficient_body_are_refetched(
+    monkeypatch, module_name, class_name, site, category, no
+):
+    from crawl_scheduler.community_website.board_list_entry import BoardListEntry
+
+    module = importlib.import_module(
+        f"crawl_scheduler.community_website.{module_name}"
+    )
+
+    class FakeDB:
+        def __init__(self):
+            self.metric_refreshes = []
+            self.content_refreshes = []
+
+        def find(self, collection, query):
+            return [{"id": "existing", "contents": []}]
+
+        def refresh_native_metrics(self, *args):
+            self.metric_refreshes.append(args)
+
+        def needs_content_refresh(self, *args):
+            return True
+
+        def refresh_crawled_content(self, *args, **kwargs):
+            self.content_refreshes.append((args, kwargs))
+            return {"analysis_status": "pending"}
+
+        def insert_one(self, *args, **kwargs):
+            pytest.fail("content recovery must update the existing post")
+
+    fake_db = FakeDB()
+    monkeypatch.setattr(module, "PostgresController", lambda: fake_db)
+    crawler = getattr(module, class_name)()
+    if hasattr(crawler, "request_delay_seconds"):
+        crawler.request_delay_seconds = 0
+
+    relative_url = f"/zboard/view.php?id={category}&no={no}"
+    entry_url = (
+        relative_url
+        if site == "ppomppu"
+        else f"https://example.com/{no}"
+    )
+    entry = BoardListEntry(
+        url=entry_url,
+        category=category,
+        no=no,
+        title="본문을 다시 수집할 글",
+        created_at=datetime.now(ZoneInfo("Asia/Seoul")),
+        native_comment_count=7,
+        native_like_count=3,
+        native_view_count=120,
+        source_rank=2,
+    )
+    recovered_contents = [
+        {
+            "type": "text",
+            "text": "재수집한 본문에는 요약에 필요한 배경과 맥락이 충분히 포함되어 있습니다.",
+        }
+    ]
+    body_calls = []
+    monkeypatch.setattr(crawler, "get_board_entries", lambda: [entry])
+    monkeypatch.setattr(
+        crawler,
+        "get_board_contents",
+        lambda *args, **kwargs: body_calls.append((args, kwargs))
+        or recovered_contents,
+    )
+
+    assert crawler.get_realtime_best() is True
+
+    query = {"site": site, "category": category, "no": no}
+    expected_url = (
+        f"https://ppomppu.co.kr{relative_url}"
+        if site == "ppomppu"
+        else entry_url
+    )
+    assert len(body_calls) == 1
+    assert body_calls[0][1]["save_videos"] is False
+    assert fake_db.metric_refreshes == [
+        ("Realtime", query, entry.metrics_dict())
+    ]
+    assert fake_db.content_refreshes == [
+        (
+            ("Realtime", query, recovered_contents),
+            {"title": entry.title, "url": expected_url},
         )
     ]
 

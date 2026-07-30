@@ -101,6 +101,308 @@ def test_realtime_document_stores_default_summary_without_ai_analysis(tmp_path):
     assert analyzer.calls == 0
 
 
+def test_insufficient_new_content_is_failed_until_body_refresh(
+    monkeypatch,
+    tmp_path,
+):
+    from crawl_scheduler.constants import DEFAULT_GPT_ANSWER
+    from crawl_scheduler.db.postgres_controller import (
+        INSUFFICIENT_CONTENT_ANALYSIS_ERROR,
+        PostgresController,
+    )
+
+    monkeypatch.setenv("CONTENT_REFRESH_COOLDOWN_SECONDS", "0")
+    controller = PostgresController(database_url=f"sqlite:///{tmp_path / 'crawler.db'}")
+    query = {"site": "dcinside", "category": "dcbest", "no": 125}
+
+    controller.insert_one(
+        "Realtime",
+        {
+            **query,
+            "title": "본문 없이 저장된 제목",
+            "url": "https://example.com/post/125",
+            "contents": [
+                {"type": "metadata", "image_url": "https://example.com/preview.jpg"}
+            ],
+            "gpt_answer": DEFAULT_GPT_ANSWER,
+        },
+    )
+
+    row = controller.find("Realtime", query)[0]
+
+    assert row["analysis_status"] == "failed"
+    assert row["analysis_error"] == INSUFFICIENT_CONTENT_ANALYSIS_ERROR
+    assert controller.needs_content_refresh("Realtime", query)
+
+
+def test_successful_content_refresh_requeues_incomplete_analysis(tmp_path):
+    from crawl_scheduler.db.models import Board
+    from crawl_scheduler.db.postgres import get_session_factory
+    from crawl_scheduler.db.postgres_controller import PostgresController
+
+    controller = PostgresController(database_url=f"sqlite:///{tmp_path / 'crawler.db'}")
+    query = {"site": "ppomppu", "category": "freeboard", "no": 126}
+    result = controller.insert_one(
+        "Realtime",
+        {
+            **query,
+            "title": "재수집이 필요한 글",
+            "url": "https://example.com/post/126",
+            "contents": [],
+        },
+    )
+    with get_session_factory(controller.database_url)() as session:
+        board = session.get(Board, result.inserted_id)
+        board.analysis_retry_count = 3
+        board.analysis_error = "old analysis failure"
+        board.analysis_started_at = datetime(2026, 7, 30, tzinfo=timezone.utc)
+        session.commit()
+
+    refreshed = controller.refresh_crawled_content(
+        "Realtime",
+        query,
+        [
+            {
+                "type": "text",
+                "text": "재수집한 본문에는 사건의 배경과 이용자 반응이 충분히 담겨 있습니다.",
+            }
+        ],
+    )
+
+    assert refreshed is not None
+    assert refreshed["analysis_status"] == "pending"
+    assert refreshed["analysis_requested_at"] is not None
+    assert refreshed["analysis_started_at"] is None
+    assert refreshed["analysis_retry_count"] == 0
+    assert refreshed["analysis_error"] is None
+    assert refreshed["contents"] == [
+        {
+            "type": "text",
+            "text": "재수집한 본문에는 사건의 배경과 이용자 반응이 충분히 담겨 있습니다.",
+        }
+    ]
+    assert not controller.needs_content_refresh("Realtime", query)
+
+
+def test_failed_content_refresh_does_not_persist_title_only_input(tmp_path):
+    from crawl_scheduler.db.postgres_controller import (
+        INSUFFICIENT_CONTENT_ANALYSIS_ERROR,
+        PostgresController,
+    )
+
+    controller = PostgresController(database_url=f"sqlite:///{tmp_path / 'crawler.db'}")
+    query = {"site": "ygosu", "category": "humor", "no": 127}
+    controller.insert_one(
+        "Realtime",
+        {
+            **query,
+            "title": "제목만 있는 글",
+            "url": "https://example.com/post/127",
+            "contents": [],
+        },
+    )
+
+    refreshed = controller.refresh_crawled_content(
+        "Realtime",
+        query,
+        [{"type": "text", "text": "제목만 있는 글"}],
+    )
+    row = controller.find("Realtime", query)[0]
+
+    assert refreshed is None
+    assert row["contents"] == []
+    assert row["analysis_status"] == "failed"
+    assert row["analysis_error"] == INSUFFICIENT_CONTENT_ANALYSIS_ERROR
+
+
+def test_content_refresh_preserves_completed_analysis(tmp_path):
+    from crawl_scheduler.db.models import Board
+    from crawl_scheduler.db.postgres import get_session_factory
+    from crawl_scheduler.db.postgres_controller import PostgresController
+
+    controller = PostgresController(database_url=f"sqlite:///{tmp_path / 'crawler.db'}")
+    query = {"site": "inven", "category": "hot", "no": 128}
+    result = controller.insert_one(
+        "Realtime",
+        {
+            **query,
+            "title": "완료된 분석 글",
+            "url": "https://example.com/post/128",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": "최초 본문에도 분석에 필요한 설명과 맥락이 충분히 들어 있습니다.",
+                }
+            ],
+        },
+    )
+    completed_at = datetime(2026, 7, 29, 12, tzinfo=timezone.utc)
+    with get_session_factory(controller.database_url)() as session:
+        board = session.get(Board, result.inserted_id)
+        board.gpt_answer = "기존에 완료된 요약"
+        board.tags = ["기존", "태그"]
+        board.llm_engagement_score = 84
+        board.llm_engagement_reason = "기존 참여도 근거"
+        board.analysis_status = "done"
+        board.analysis_retry_count = 2
+        board.analysis_updated_at = completed_at
+        session.commit()
+
+    refreshed = controller.refresh_crawled_content(
+        "Realtime",
+        query,
+        [
+            {
+                "type": "text",
+                "text": "새로 수집한 본문은 더 상세하지만 완료된 분석 결과는 그대로 보존합니다.",
+            }
+        ],
+        title="갱신된 제목",
+    )
+
+    assert refreshed is not None
+    assert refreshed["title"] == "갱신된 제목"
+    assert refreshed["gpt_answer"] == "기존에 완료된 요약"
+    assert refreshed["tags"] == ["기존", "태그"]
+    assert refreshed["llm_engagement_score"] == 84
+    assert refreshed["llm_engagement_reason"] == "기존 참여도 근거"
+    assert refreshed["analysis_status"] == "done"
+    assert refreshed["analysis_retry_count"] == 2
+    assert refreshed["analysis_updated_at"].replace(tzinfo=timezone.utc) == completed_at
+
+
+def test_content_recovery_invalidates_summary_made_from_insufficient_body(tmp_path):
+    from crawl_scheduler.constants import DEFAULT_GPT_ANSWER
+    from crawl_scheduler.db.models import Board
+    from crawl_scheduler.db.postgres import get_session_factory
+    from crawl_scheduler.db.postgres_controller import PostgresController
+
+    controller = PostgresController(database_url=f"sqlite:///{tmp_path / 'crawler.db'}")
+    query = {"site": "dcinside", "category": "dcbest", "no": 129}
+    result = controller.insert_one(
+        "Realtime",
+        {
+            **query,
+            "title": "과거 제목만 있던 글",
+            "url": "https://example.com/post/129",
+            "contents": [],
+        },
+    )
+    with get_session_factory(controller.database_url)() as session:
+        board = session.get(Board, result.inserted_id)
+        board.gpt_answer = "제목만 보고 생성한 오래된 요약"
+        board.tags = ["오래된", "태그"]
+        board.llm_engagement_score = 77
+        board.llm_engagement_reason = "오래된 근거"
+        board.analysis_status = "done"
+        session.commit()
+
+    refreshed = controller.refresh_crawled_content(
+        "Realtime",
+        query,
+        [
+            {
+                "type": "text",
+                "text": "복구된 본문에는 사건의 배경과 진행 과정 및 이후 반응이 충분히 담겨 있습니다.",
+            }
+        ],
+    )
+
+    assert refreshed is not None
+    assert refreshed["gpt_answer"] == DEFAULT_GPT_ANSWER
+    assert refreshed["tags"] == []
+    assert refreshed["llm_engagement_score"] is None
+    assert refreshed["llm_engagement_reason"] is None
+    assert refreshed["analysis_status"] == "pending"
+    assert refreshed["analysis_retry_count"] == 0
+    assert refreshed["analysis_error"] is None
+
+
+def test_insufficient_content_refresh_uses_cooldown(monkeypatch, tmp_path):
+    from crawl_scheduler.db.postgres_controller import PostgresController
+
+    monkeypatch.setenv("CONTENT_REFRESH_COOLDOWN_SECONDS", "900")
+    controller = PostgresController(database_url=f"sqlite:///{tmp_path / 'crawler.db'}")
+    query = {"site": "ygosu", "category": "humor", "no": 130}
+    controller.insert_one(
+        "Realtime",
+        {
+            **query,
+            "title": "계속 부족한 글",
+            "url": "https://example.com/post/130",
+            "contents": [],
+        },
+    )
+
+    assert not controller.needs_content_refresh("Realtime", query)
+
+    monkeypatch.setenv("CONTENT_REFRESH_COOLDOWN_SECONDS", "0")
+    assert controller.needs_content_refresh("Realtime", query)
+
+
+def test_processing_content_is_not_replaced_by_crawler_refresh(tmp_path):
+    from crawl_scheduler.db.models import Board
+    from crawl_scheduler.db.postgres import get_session_factory
+    from crawl_scheduler.db.postgres_controller import PostgresController
+
+    controller = PostgresController(database_url=f"sqlite:///{tmp_path / 'crawler.db'}")
+    query = {"site": "ppomppu", "category": "freeboard", "no": 131}
+    result = controller.insert_one(
+        "Realtime",
+        {
+            **query,
+            "title": "분석 중인 글",
+            "url": "https://example.com/post/131",
+            "contents": [],
+        },
+    )
+    with get_session_factory(controller.database_url)() as session:
+        board = session.get(Board, result.inserted_id)
+        board.analysis_status = "processing"
+        session.commit()
+
+    refreshed = controller.refresh_crawled_content(
+        "Realtime",
+        query,
+        [{"type": "text", "text": "충분히 길게 복구된 새 본문과 상세한 사건 설명입니다."}],
+    )
+
+    assert refreshed is None
+    assert not controller.needs_content_refresh("Realtime", query)
+    assert controller.find("Realtime", query)[0]["contents"] == []
+
+
+def test_local_image_content_is_ready_for_vision_enrichment(monkeypatch, tmp_path):
+    from crawl_scheduler.db.postgres_controller import PostgresController
+
+    media_root = tmp_path / "media"
+    image_path = media_root / "Dcinside" / "dcbest" / "132" / "captured.webp"
+    image_path.parent.mkdir(parents=True)
+    image_path.write_bytes(b"image")
+    monkeypatch.setenv("ROOT", str(media_root))
+    controller = PostgresController(database_url=f"sqlite:///{tmp_path / 'crawler.db'}")
+    query = {"site": "dcinside", "category": "dcbest", "no": 132}
+    controller.insert_one(
+        "Realtime",
+        {
+            **query,
+            "title": "이미지 중심 게시물",
+            "url": "https://example.com/post/129",
+            "contents": [
+                {
+                    "type": "image",
+                    "media_path": "Dcinside/dcbest/132/captured.webp",
+                }
+            ],
+        },
+    )
+
+    row = controller.find("Realtime", query)[0]
+
+    assert row["analysis_status"] == "pending"
+    assert not controller.needs_content_refresh("Realtime", query)
+
+
 def test_gpt_and_tag_collections_are_virtual_defaults(tmp_path):
     from crawl_scheduler.db.postgres_controller import PostgresController
 

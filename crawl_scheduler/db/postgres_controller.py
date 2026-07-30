@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
 from math import exp, isfinite
+import os
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -11,6 +12,7 @@ from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, DEFAULT_TAG
 from crawl_scheduler.crawled_content import (
     extract_llm_text,
     first_thumbnail_path,
+    has_sufficient_body,
     normalize_contents,
 )
 from crawl_scheduler.db.models import (
@@ -33,6 +35,11 @@ BOARD_COLLECTIONS = {"realtime", "daily"}
 SNAPSHOT_RETENTION_DAYS = 7
 SNAPSHOT_CLEANUP_INTERVAL = timedelta(hours=1)
 SEOUL_TIMEZONE = ZoneInfo("Asia/Seoul")
+INSUFFICIENT_CONTENT_ANALYSIS_ERROR = (
+    "crawled body is insufficient for AI analysis; content refresh required"
+)
+DEFAULT_CONTENT_REFRESH_COOLDOWN_SECONDS = 15 * 60
+MAX_CONTENT_REFRESH_COOLDOWN_SECONDS = 24 * 60 * 60
 
 
 @dataclass(frozen=True)
@@ -70,6 +77,122 @@ class PostgresController:
             stmt = select(Board)
             stmt = self._apply_board_query(stmt, query)
             return [self._board_to_document(board) for board in session.scalars(stmt).all()]
+
+    def needs_content_refresh(self, collection_name: str, query: dict) -> bool:
+        """Return whether an existing board lacks analyzable or recoverable body data."""
+        if collection_name.lower() not in BOARD_COLLECTIONS:
+            return False
+
+        with get_session_factory(self.database_url)() as session:
+            board = session.scalars(self._apply_board_query(select(Board), query)).first()
+            if board is None:
+                return False
+            if has_sufficient_body(
+                board.title,
+                board.contents,
+                media_root=self._media_root(),
+            ):
+                return False
+            if board.analysis_status == "processing":
+                return False
+            if (
+                board.analysis_error == INSUFFICIENT_CONTENT_ANALYSIS_ERROR
+                and board.analysis_updated_at is not None
+            ):
+                updated_at = self._coerce_datetime(board.analysis_updated_at)
+                if (
+                    datetime.now(timezone.utc) - updated_at
+                    < self._content_refresh_cooldown()
+                ):
+                    return False
+            return True
+
+    def refresh_crawled_content(
+        self,
+        collection_name: str,
+        query: dict,
+        contents: object,
+        *,
+        title: object = None,
+        url: object = None,
+    ) -> dict | None:
+        """Replace an insufficient body and safely reopen incomplete analysis.
+
+        Insufficient refresh results are not persisted.  They do mark an
+        still-insufficient board as failed so the analysis worker cannot consume
+        title-only input.  Recovering a formerly insufficient body invalidates
+        any old summary because it could only have been based on sparse input.
+        """
+        if collection_name.lower() not in BOARD_COLLECTIONS:
+            return None
+
+        normalized_contents = normalize_contents(contents)
+        now = datetime.now(timezone.utc)
+        with get_session_factory(self.database_url)() as session:
+            stmt = self._apply_board_query(select(Board), query)
+            if get_engine(self.database_url).dialect.name == "postgresql":
+                stmt = stmt.with_for_update()
+            board = session.scalars(stmt).first()
+            if board is None:
+                return None
+            if board.analysis_status == "processing":
+                return None
+
+            refreshed_title = self._coerce_clean_text(title) or board.title
+            media_root = self._media_root()
+            existing_content_sufficient = has_sufficient_body(
+                board.title,
+                board.contents,
+                media_root=media_root,
+            )
+            if not has_sufficient_body(
+                refreshed_title,
+                normalized_contents,
+                media_root=media_root,
+            ):
+                if not existing_content_sufficient:
+                    completed_analysis = self._has_completed_analysis(board)
+                    if not completed_analysis:
+                        board.analysis_status = "failed"
+                        board.analysis_started_at = None
+                    board.analysis_updated_at = now
+                    board.analysis_error = INSUFFICIENT_CONTENT_ANALYSIS_ERROR
+                    session.commit()
+                return None
+
+            board.contents = self._json_safe(normalized_contents)
+            if self._coerce_clean_text(title):
+                board.title = str(title).strip()
+            if self._coerce_clean_text(url):
+                board.url = str(url).strip()
+            thumbnail = first_thumbnail_path(normalized_contents)
+            if thumbnail or not existing_content_sufficient:
+                board.thumbnail = thumbnail
+
+            if not existing_content_sufficient:
+                board.gpt_answer = DEFAULT_GPT_ANSWER
+                board.tags = []
+                board.llm_engagement_score = None
+                board.llm_engagement_reason = None
+                board.analysis_status = "pending"
+                board.analysis_requested_at = now
+                board.analysis_started_at = None
+                board.analysis_updated_at = now
+                board.analysis_retry_count = 0
+                board.analysis_error = None
+            elif self._has_completed_analysis(board):
+                board.analysis_status = "done"
+            else:
+                board.analysis_status = "pending"
+                board.analysis_requested_at = now
+                board.analysis_started_at = None
+                board.analysis_updated_at = now
+                board.analysis_retry_count = 0
+                board.analysis_error = None
+
+            session.commit()
+            session.refresh(board)
+            return self._board_to_document(board)
 
     def insert_one(self, collection_name: str, document: dict) -> InsertOneResult:
         collection = collection_name.lower()
@@ -238,15 +361,71 @@ class PostgresController:
             session.refresh(board)
             return board
 
-    def _board_values(self, collection_name: str, document: dict, existing_board: Board | None = None) -> dict:
+    def _board_values(
+        self,
+        collection_name: str,
+        document: dict,
+        existing_board: Board | None = None,
+    ) -> dict:
         site = str(document.get("site") or "unknown")
         category, no = self._category_and_no(collection_name, document)
-        contents = normalize_contents(document.get("contents"))
+        title = str(
+            document.get("title")
+            or getattr(existing_board, "title", None)
+            or ""
+        )
+        incoming_contents = normalize_contents(document.get("contents"))
+        existing_contents = normalize_contents(
+            getattr(existing_board, "contents", None)
+        )
+        media_root = self._media_root()
+        incoming_content_sufficient = has_sufficient_body(
+            title,
+            incoming_contents,
+            media_root=media_root,
+        )
+        existing_content_sufficient = bool(
+            existing_board
+            and has_sufficient_body(
+                existing_board.title,
+                existing_contents,
+                media_root=media_root,
+            )
+        )
+        if existing_board and (
+            "contents" not in document
+            or (existing_content_sufficient and not incoming_content_sufficient)
+        ):
+            contents = existing_contents
+        else:
+            contents = incoming_contents
+        content_sufficient = has_sufficient_body(
+            title,
+            contents,
+            media_root=media_root,
+        )
+        content_recovered = bool(
+            existing_board
+            and "contents" in document
+            and not existing_content_sufficient
+            and content_sufficient
+        )
         summary, tags = self._analysis_values(document, existing_board)
-        analysis_status, analysis_updated_at = self._analysis_queue_values(
+        incoming_summary = self._coerce_text(
+            document.get("gpt_answer") or document.get("GPTAnswer")
+        )
+        content_reopened = (
+            content_recovered
+            and not self._has_stored_summary(incoming_summary)
+        )
+        if content_reopened:
+            summary = DEFAULT_GPT_ANSWER
+            tags = []
+        analysis_queue_values = self._analysis_queue_values(
             document,
             existing_board,
-            summary,
+            content_sufficient=content_sufficient,
+            content_recovered=content_recovered,
         )
         llm_engagement_score = self._optional_score(
             document["llm_engagement_score"]
@@ -258,25 +437,22 @@ class PostgresController:
             if "llm_engagement_reason" in document
             else getattr(existing_board, "llm_engagement_reason", None)
         )
+        if content_reopened:
+            llm_engagement_score = None
+            llm_engagement_reason = None
         return {
             "source_id": self._source_id(site, category, no, document),
             "category": category,
             "no": no,
             "site": site,
-            "title": str(document.get("title") or ""),
+            "title": title,
             "url": str(document.get("url") or ""),
             "contents": self._json_safe(contents),
             "gpt_answer": summary,
             "tags": tags,
             "llm_engagement_score": llm_engagement_score,
             "llm_engagement_reason": llm_engagement_reason,
-            "analysis_status": analysis_status,
             "analysis_priority": int(document.get("analysis_priority") or getattr(existing_board, "analysis_priority", 0) or 0),
-            "analysis_requested_at": document.get("analysis_requested_at") or getattr(existing_board, "analysis_requested_at", None),
-            "analysis_started_at": getattr(existing_board, "analysis_started_at", None),
-            "analysis_updated_at": analysis_updated_at,
-            "analysis_retry_count": int(document.get("analysis_retry_count") or getattr(existing_board, "analysis_retry_count", 0) or 0),
-            "analysis_error": getattr(existing_board, "analysis_error", None),
             "thumbnail": document.get("thumbnail") or first_thumbnail_path(contents),
             "comment_count": int(document.get("comment_count") or 0),
             "like_count": int(document.get("like_count") or 0),
@@ -293,6 +469,7 @@ class PostgresController:
             "metrics_crawled_at": document.get("metrics_crawled_at"),
             "next_metrics_crawl_at": document.get("next_metrics_crawl_at"),
             "created_at": self._coerce_datetime(document.get("create_time") or document.get("created_at")),
+            **analysis_queue_values,
         }
 
     def _category_and_no(self, collection_name: str, document: dict) -> tuple[str, int]:
@@ -522,22 +699,111 @@ class PostgresController:
 
         return incoming_summary, incoming_tags
 
-    @staticmethod
-    def _analysis_queue_values(document: dict, existing_board: Board | None, summary: str | None) -> tuple[str, datetime | None]:
+    @classmethod
+    def _analysis_queue_values(
+        cls,
+        document: dict,
+        existing_board: Board | None,
+        *,
+        content_sufficient: bool,
+        content_recovered: bool,
+    ) -> dict:
         incoming_status = document.get("analysis_status")
         existing_status = getattr(existing_board, "analysis_status", None)
         existing_updated_at = getattr(existing_board, "analysis_updated_at", None)
+        existing_requested_at = getattr(existing_board, "analysis_requested_at", None)
+        existing_started_at = getattr(existing_board, "analysis_started_at", None)
+        existing_retry_count = int(
+            getattr(existing_board, "analysis_retry_count", 0) or 0
+        )
+        existing_error = getattr(existing_board, "analysis_error", None)
+        now = datetime.now(timezone.utc)
 
-        if summary and summary != DEFAULT_GPT_ANSWER:
-            return "done", datetime.now(timezone.utc)
+        requested_at = (
+            document.get("analysis_requested_at")
+            if "analysis_requested_at" in document
+            else existing_requested_at
+        )
+        retry_count = (
+            int(document.get("analysis_retry_count") or 0)
+            if "analysis_retry_count" in document
+            else existing_retry_count
+        )
+
+        incoming_summary = cls._coerce_text(
+            document.get("gpt_answer") or document.get("GPTAnswer")
+        )
+        incoming_has_summary = cls._has_stored_summary(incoming_summary)
+        existing_analysis_complete = cls._has_completed_analysis(existing_board)
+        if incoming_has_summary:
+            return {
+                "analysis_status": "done",
+                "analysis_requested_at": requested_at,
+                "analysis_started_at": existing_started_at,
+                "analysis_updated_at": now,
+                "analysis_retry_count": retry_count,
+                "analysis_error": None,
+            }
+
+        if content_recovered:
+            return {
+                "analysis_status": "pending",
+                "analysis_requested_at": now,
+                "analysis_started_at": None,
+                "analysis_updated_at": now,
+                "analysis_retry_count": 0,
+                "analysis_error": None,
+            }
+
+        if existing_analysis_complete:
+            return {
+                "analysis_status": "done",
+                "analysis_requested_at": requested_at,
+                "analysis_started_at": existing_started_at,
+                "analysis_updated_at": existing_updated_at,
+                "analysis_retry_count": retry_count,
+                "analysis_error": existing_error,
+            }
+
+        if not content_sufficient:
+            return {
+                "analysis_status": "failed",
+                "analysis_requested_at": requested_at,
+                "analysis_started_at": None,
+                "analysis_updated_at": now,
+                "analysis_retry_count": retry_count,
+                "analysis_error": INSUFFICIENT_CONTENT_ANALYSIS_ERROR,
+            }
 
         if incoming_status in {"pending", "processing", "done", "failed"}:
-            return incoming_status, datetime.now(timezone.utc)
+            status = "pending" if incoming_status == "done" else incoming_status
+            return {
+                "analysis_status": status,
+                "analysis_requested_at": requested_at,
+                "analysis_started_at": existing_started_at,
+                "analysis_updated_at": now,
+                "analysis_retry_count": retry_count,
+                "analysis_error": existing_error,
+            }
 
         if existing_status:
-            return existing_status, existing_updated_at
+            return {
+                "analysis_status": existing_status,
+                "analysis_requested_at": requested_at,
+                "analysis_started_at": existing_started_at,
+                "analysis_updated_at": existing_updated_at,
+                "analysis_retry_count": retry_count,
+                "analysis_error": existing_error,
+            }
 
-        return "pending", None
+        return {
+            "analysis_status": "pending",
+            "analysis_requested_at": requested_at,
+            "analysis_started_at": None,
+            "analysis_updated_at": None,
+            "analysis_retry_count": retry_count,
+            "analysis_error": None,
+        }
 
     @staticmethod
     def _analysis_text(document: dict, contents: object) -> str:
@@ -682,6 +948,48 @@ class PostgresController:
             return None
         reason = value.strip()
         return reason[:240] or None
+
+    @staticmethod
+    def _has_stored_summary(value: object) -> bool:
+        summary = value.strip() if isinstance(value, str) else ""
+        return bool(summary and summary != DEFAULT_GPT_ANSWER)
+
+    @classmethod
+    def _has_completed_analysis(cls, board: Board | None) -> bool:
+        return bool(
+            board
+            and board.analysis_status == "done"
+            and cls._has_stored_summary(board.gpt_answer)
+        )
+
+    @staticmethod
+    def _coerce_clean_text(value: object) -> str | None:
+        if value is None:
+            return None
+        text_value = str(value).strip()
+        return text_value or None
+
+    @staticmethod
+    def _media_root() -> str:
+        return os.getenv("ROOT") or "./media"
+
+    @staticmethod
+    def _content_refresh_cooldown() -> timedelta:
+        raw_value = os.getenv("CONTENT_REFRESH_COOLDOWN_SECONDS")
+        try:
+            seconds = (
+                int(raw_value)
+                if raw_value is not None
+                else DEFAULT_CONTENT_REFRESH_COOLDOWN_SECONDS
+            )
+        except ValueError:
+            seconds = DEFAULT_CONTENT_REFRESH_COOLDOWN_SECONDS
+        return timedelta(
+            seconds=min(
+                max(seconds, 0),
+                MAX_CONTENT_REFRESH_COOLDOWN_SECONDS,
+            )
+        )
 
     @staticmethod
     def _coerce_text(value: object) -> str | None:

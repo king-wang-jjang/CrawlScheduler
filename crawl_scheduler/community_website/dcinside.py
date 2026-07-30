@@ -4,9 +4,9 @@ import requests
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, urljoin, urlparse
 from zoneinfo import ZoneInfo
-from crawl_scheduler.config import Config
-from crawl_scheduler.crawled_content import image_block, metadata_image_block, text_block, video_block
+from crawl_scheduler.crawled_content import metadata_image_block
 from crawl_scheduler.db.postgres_controller import PostgresController
+from crawl_scheduler.community_website.article_content import build_ordered_content_blocks
 from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
 from crawl_scheduler.community_website.board_list_entry import BoardListEntry, parse_native_count, recent_source_datetime
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_DCINSIDE, DEFAULT_TAG
@@ -43,6 +43,21 @@ class Dcinside(AbstractCommunityWebsite):
                     self.db_controller.refresh_native_metrics(
                         'Realtime', query, entry.metrics_dict()
                     )
+                    if self.db_controller.needs_content_refresh('Realtime', query):
+                        contents = self.get_board_contents(
+                            url=entry.url,
+                            category=entry.category,
+                            no=entry.no,
+                            created_at=entry.created_at,
+                            save_videos=False,
+                        )
+                        self.db_controller.refresh_crawled_content(
+                            'Realtime',
+                            query,
+                            contents,
+                            title=entry.title,
+                            url=entry.url,
+                        )
                     already_exists_post.append((entry.category, entry.no))
                     continue
 
@@ -194,62 +209,42 @@ class Dcinside(AbstractCommunityWebsite):
         except ValueError:
             return None  # 파싱 실패 시 None 반환
 
-    def get_board_contents(self, category=None, no=None, url=None, created_at=None):
+    def get_board_contents(
+        self,
+        category=None,
+        no=None,
+        url=None,
+        created_at=None,
+        save_videos=True,
+    ):
+        if not url:
+            return []
         content_list = []
         try:
-            respone = requests.get(url, headers=self.g_headers[0], timeout=10)
-            respone.raise_for_status()
-            soup = BeautifulSoup(respone.text, 'html.parser')
+            response = requests.get(url, headers=self.g_headers[0], timeout=10)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'html.parser')
             metadata_block = metadata_image_block(
                 super().metadata_image_url_from_soup(soup, base_url=url)
             )
             if metadata_block:
                 content_list.append(metadata_block)
             board_body = soup.find('div', class_='write_div')
-            paragraphs = board_body.find_all('p')
-
-            for p in paragraphs:
-                if p.find('img'):
-                    img_url = super().media_url_from_tag(p.find('img'), base_url=url)
-                    if not img_url:
-                        continue
-                    try:
-                        file_path = super().save_file(
-                            img_url,
-                            category=category,
-                            no=no,
-                            headers=self.g_headers[0],
-                            created_at=created_at,
-                        )
-                        if not file_path:
-                            continue
-                        img_txt = super().img_to_text(os.path.join(Config().get_env('ROOT') or './media', file_path))
-                        block = image_block(media_path=file_path, source_url=img_url, text=img_txt)
-                        if block:
-                            content_list.append(block)
-                    except Exception as e:
-                        logger.error(f"Error processing image: {url} {e}")
-                elif p.find('video'):
-                    video_url = super().media_url_from_tag(p.find('video').find('source'), base_url=url)
-                    if not video_url:
-                        continue
-                    try:
-                        file_path = super().save_file(
-                            video_url,
-                            category=category,
-                            no=no,
-                            created_at=created_at,
-                        )
-                        if file_path:
-                            block = video_block(media_path=file_path, source_url=video_url)
-                            if block:
-                                content_list.append(block)
-                    except Exception as e:
-                        logger.error(f"Error saving video: {e}")
-                else:
-                    block = text_block(p.text)
-                    if block:
-                        content_list.append(block)
+            if not board_body:
+                return content_list
+            content_list.extend(
+                build_ordered_content_blocks(
+                    self,
+                    board_body,
+                    base_url=url,
+                    category=category,
+                    no=no,
+                    created_at=created_at,
+                    headers=self.g_headers[0],
+                    save_file=super().save_file,
+                    save_videos=save_videos,
+                )
+            )
         except Exception as e:
             logger.error(f"Error fetching board contents for {no if no else url}: {e}")
 
@@ -365,9 +360,6 @@ class Dcinside(AbstractCommunityWebsite):
         if title and title.get_text(strip=True) in ['공지', '설문']:
             return True
         return False
-
-    def save_file(self, url, category, no, alt_text=None):
-        pass
 
     def _post_already_exists(self, category, no):
         existing_instance = self.db_controller.find('Realtime', {'site': SITE_DCINSIDE, 'category': category, 'no': int(no)})

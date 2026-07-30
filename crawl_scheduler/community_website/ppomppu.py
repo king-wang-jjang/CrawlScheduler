@@ -3,13 +3,12 @@ from bs4 import BeautifulSoup
 import requests
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
-from crawl_scheduler.config import Config
-from crawl_scheduler.crawled_content import image_block, metadata_image_block, text_block, video_block
+from crawl_scheduler.crawled_content import metadata_image_block
 from crawl_scheduler.db.postgres_controller import PostgresController
+from crawl_scheduler.community_website.article_content import build_ordered_content_blocks
 from crawl_scheduler.community_website.community_website import AbstractCommunityWebsite
 from crawl_scheduler.community_website.board_list_entry import BoardListEntry, parse_native_count, recent_source_datetime
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, SITE_PPOMPPU, DEFAULT_TAG
-import os
 from crawl_scheduler.utils.loghandler import logger
 
 class Ppomppu(AbstractCommunityWebsite):
@@ -53,6 +52,20 @@ class Ppomppu(AbstractCommunityWebsite):
                     self.db_controller.refresh_native_metrics(
                         'Realtime', query, entry.metrics_dict()
                     )
+                    if self.db_controller.needs_content_refresh('Realtime', query):
+                        contents = self.get_board_contents(
+                            url=domain + entry.url,
+                            category=entry.category,
+                            no=entry.no,
+                            save_videos=False,
+                        )
+                        self.db_controller.refresh_crawled_content(
+                            'Realtime',
+                            query,
+                            contents,
+                            title=entry.title,
+                            url=domain + entry.url,
+                        )
                     already_exists_post.append((entry.category, entry.no))
                     continue
                 
@@ -198,7 +211,13 @@ class Ppomppu(AbstractCommunityWebsite):
             logger.warning(f"Could not extract board id and no from URL: {url}")
             return None, None
 
-    def get_board_contents(self, category= None, no=None, url=None):
+    def get_board_contents(
+        self,
+        category=None,
+        no=None,
+        url=None,
+        save_videos=True,
+    ):
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
         content_list = []
         if url:
@@ -212,50 +231,24 @@ class Ppomppu(AbstractCommunityWebsite):
                 if metadata_block:
                     content_list.append(metadata_block)
                 board_body = soup.find('td', class_='board-contents')
-                # if category == "freeboard":
-                #     logger.info(soup)
-                #     logger.info("=========================")
-                #     logger.info(board_body)
-                paragraphs = board_body.find_all('p')
-                    
-                for p in paragraphs:
-                    if p.find('img'):
-                        img_url = super().media_url_from_tag(p.find('img'), base_url=url)
-                        if not img_url:
-                            continue
-                        try:
-                            file_path = super().save_file(img_url, category=category, no=no)
-                            if not file_path:
-                                continue
-                            img_txt = super().img_to_text(os.path.join(Config().get_env('ROOT') or './media', file_path))
-                            block = image_block(media_path=file_path, source_url=img_url, text=img_txt)
-                            if block:
-                                content_list.append(block)
-                        except Exception as e:
-                            logger.error(f"Error processing image: {url} {e}")
-                    elif p.find('video'):
-                        video_url = super().media_url_from_tag(p.find('video').find('source'), base_url=url)
-                        if not video_url:
-                            continue
-                        try:
-                            file_path = super().save_file(video_url, category=category, no=no)
-                            if file_path:
-                                block = video_block(media_path=file_path, source_url=video_url)
-                                if block:
-                                    content_list.append(block)
-                        except Exception as e:
-                            logger.error(f"Error saving video: {e}")
-                    else:
-                        block = text_block(p.text)
-                        if block:
-                            content_list.append(block)
+                if not board_body:
+                    return content_list
+                content_list.extend(
+                    build_ordered_content_blocks(
+                        self,
+                        board_body,
+                        base_url=url,
+                        category=category,
+                        no=no,
+                        headers=headers,
+                        save_file=super().save_file,
+                        save_videos=save_videos,
+                    )
+                )
             except Exception as e:
                 logger.error(f"Error fetching board contents for {no if no else url}: {e}")
 
         return content_list
-
-    def save_file(self, url):
-        pass
 
     def _post_already_exists(self, category, no):
         existing_instance = self.db_controller.find('Realtime', {'site': SITE_PPOMPPU, 'category': category, 'no': int(no)})
