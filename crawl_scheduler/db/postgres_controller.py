@@ -23,9 +23,12 @@ from crawl_scheduler.db.models import (
 )
 from crawl_scheduler.db.postgres import Base, get_engine, get_session_factory
 from crawl_scheduler.popularity import (
+    DAILY_CANDIDATE_MAX_AGE_HOURS,
     DAILY_DECAY_HOURS,
     HOT_DECAY_HOURS,
     PopularityMetrics,
+    RankingCandidate,
+    balance_site_exposure,
     calculate_popularity_scores,
 )
 from crawl_scheduler.utils.llm import LLM
@@ -309,15 +312,51 @@ class PostgresController:
 
         with get_session_factory(self.database_url)() as session:
             with session.begin():
-                ranked_boards = session.execute(
-                    select(Board.id, score_expression.label("effective_daily_score"))
-                    .order_by(
-                        desc(score_expression),
-                        desc(Board.like_count),
-                        desc(Board.created_at),
+                freshness_column = func.coalesce(
+                    Board.metrics_crawled_at,
+                    Board.score_updated_at,
+                    Board.created_at,
+                )
+                freshness_cutoff = captured_at - timedelta(
+                    hours=DAILY_CANDIDATE_MAX_AGE_HOURS
+                )
+                site_ranked = select(
+                    Board.id.label("board_id"),
+                    Board.site.label("site"),
+                    score_expression.label("effective_daily_score"),
+                    Board.created_at.label("created_at"),
+                    func.row_number()
+                    .over(
+                        partition_by=Board.site,
+                        order_by=(
+                            desc(score_expression),
+                            desc(Board.like_count),
+                            desc(Board.created_at),
+                        ),
                     )
-                    .limit(snapshot_limit)
+                    .label("site_rank"),
+                ).where(freshness_column >= freshness_cutoff).subquery()
+                site_candidates = session.execute(
+                    select(
+                        site_ranked.c.board_id,
+                        site_ranked.c.site,
+                        site_ranked.c.effective_daily_score,
+                        site_ranked.c.created_at,
+                    ).where(site_ranked.c.site_rank <= snapshot_limit)
                 ).all()
+                candidate_by_id = {
+                    str(board_id): RankingCandidate(
+                        board_id=str(board_id),
+                        site=str(site),
+                        score=float(score or 0.0),
+                        created_at=created_at,
+                    )
+                    for board_id, site, score, created_at in site_candidates
+                }
+                ranked_boards = balance_site_exposure(
+                    candidate_by_id.values(),
+                    snapshot_limit,
+                )
                 session.execute(
                     delete(DailyTop10Snapshot).where(
                         DailyTop10Snapshot.snapshot_date == snapshot_date
@@ -328,11 +367,11 @@ class PostgresController:
                         DailyTop10Snapshot(
                             snapshot_date=snapshot_date,
                             rank=rank,
-                            board_id=board_id,
-                            daily_score=float(daily_score or 0.0),
+                            board_id=candidate.board_id,
+                            daily_score=candidate.score,
                             captured_at=captured_at,
                         )
-                        for rank, (board_id, daily_score) in enumerate(
+                        for rank, candidate in enumerate(
                             ranked_boards,
                             start=1,
                         )
@@ -1052,8 +1091,8 @@ class PostgresController:
                 site=board.site,
                 created_at=board.created_at,
                 captured_at=captured_at,
-                comment_count=comment_count or 0,
-                like_count=like_count or 0,
+                comment_count=comment_count,
+                like_count=like_count,
                 view_count=view_count,
                 source_rank=source_rank,
                 llm_engagement_score=board.llm_engagement_score,

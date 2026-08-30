@@ -2,7 +2,12 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from crawl_scheduler.popularity import PopularityMetrics, calculate_popularity_scores
+from crawl_scheduler.popularity import (
+    PopularityMetrics,
+    RankingCandidate,
+    balance_site_exposure,
+    calculate_popularity_scores,
+)
 
 
 def test_calculate_popularity_scores_uses_recent_growth():
@@ -35,7 +40,7 @@ def test_calculate_popularity_scores_uses_recent_growth():
     assert rising.breakdown["delta_comments_20m"] == 28
     assert rising.breakdown["delta_likes_20m"] == 19
     assert rising.breakdown["acceleration_component"] == 2.0
-    assert rising.breakdown["algorithm_version"] == 2
+    assert rising.breakdown["algorithm_version"] == 3
 
 
 def test_llm_engagement_score_is_centered_and_defaults_to_neutral():
@@ -180,3 +185,146 @@ def test_source_rank_is_a_bounded_explicit_addend():
     assert first.breakdown["hot_source_rank_addend"] == 2.0
     assert fourth.breakdown["hot_source_rank_addend"] == 1.0
     assert unranked.breakdown["hot_source_rank_addend"] == 0.0
+
+
+def test_site_profiles_make_equivalent_relative_engagement_comparable():
+    captured_at = datetime(2026, 6, 23, 10, 20, tzinfo=timezone.utc)
+    common = {
+        "created_at": captured_at - timedelta(hours=1),
+        "captured_at": captured_at,
+        "source_rank": 3,
+    }
+
+    dcinside = calculate_popularity_scores(
+        PopularityMetrics(
+            **common,
+            site="dcinside",
+            comment_count=60,
+            like_count=100,
+            view_count=12_000,
+        )
+    )
+    ppomppu = calculate_popularity_scores(
+        PopularityMetrics(
+            **common,
+            site="ppomppu",
+            comment_count=25,
+            like_count=20,
+            view_count=4_000,
+        )
+    )
+
+    assert dcinside.hot_score == pytest.approx(ppomppu.hot_score)
+    assert dcinside.daily_score == pytest.approx(ppomppu.daily_score)
+    assert dcinside.breakdown["comment_count"] == 60
+    assert dcinside.breakdown["like_count"] == 100
+    assert dcinside.breakdown["view_count"] == 12_000
+    assert dcinside.breakdown["normalized_comment_count"] == pytest.approx(1.0)
+    assert dcinside.breakdown["normalized_like_count"] == pytest.approx(1.0)
+    assert dcinside.breakdown["normalized_view_count"] == pytest.approx(1.0)
+    assert dcinside.breakdown["site_profile"] == "dcinside"
+    assert ppomppu.breakdown["site_profile"] == "ppomppu"
+
+
+def test_unavailable_source_metric_is_reweighted_instead_of_treated_as_zero():
+    captured_at = datetime(2026, 6, 23, 10, 20, tzinfo=timezone.utc)
+    common = {
+        "site": "theqoo",
+        "created_at": captured_at - timedelta(hours=1),
+        "captured_at": captured_at,
+        "comment_count": 120,
+        "view_count": 30_000,
+    }
+
+    unavailable = calculate_popularity_scores(
+        PopularityMetrics(**common, like_count=None)
+    )
+    known_zero = calculate_popularity_scores(
+        PopularityMetrics(**common, like_count=0)
+    )
+    at_baseline = calculate_popularity_scores(
+        PopularityMetrics(**common, like_count=50)
+    )
+
+    assert unavailable.breakdown["metric_availability"] == {
+        "comments": True,
+        "likes": False,
+        "views": True,
+    }
+    assert unavailable.breakdown["total_available_weight"] == pytest.approx(1.4)
+    assert unavailable.breakdown["total_component"] == pytest.approx(
+        at_baseline.breakdown["total_component"]
+    )
+    assert unavailable.daily_score > known_zero.daily_score
+
+
+def test_unknown_site_uses_documented_default_profile():
+    captured_at = datetime(2026, 6, 23, 10, 20, tzinfo=timezone.utc)
+
+    scores = calculate_popularity_scores(
+        PopularityMetrics(
+            site="new-community",
+            created_at=captured_at,
+            captured_at=captured_at,
+            comment_count=30,
+            like_count=30,
+            view_count=5_000,
+        )
+    )
+
+    assert scores.breakdown["site_profile"] == "default"
+    assert scores.breakdown["site_baselines"]["comment_total"] == 30.0
+    assert scores.breakdown["total_component"] == pytest.approx(3.2)
+
+
+def test_site_balanced_selection_covers_each_site_before_exposure_adjusted_fill():
+    created_at = datetime(2026, 8, 12, 6, tzinfo=timezone.utc)
+    candidates = [
+        RankingCandidate("dc-1", "dcinside", 100, created_at),
+        RankingCandidate("dc-2", "dcinside", 90, created_at),
+        RankingCandidate("dc-3", "dcinside", 80, created_at),
+        RankingCandidate("pp-1", "ppomppu", 40, created_at),
+        RankingCandidate("pp-2", "ppomppu", 30, created_at),
+        RankingCandidate("tq-1", "theqoo", 20, created_at),
+        RankingCandidate("low-1", "low-quality", 10, created_at),
+    ]
+
+    selected = balance_site_exposure(candidates, limit=5)
+
+    assert [candidate.board_id for candidate in selected] == [
+        "dc-1",
+        "pp-1",
+        "tq-1",
+        "low-1",
+        "dc-2",
+    ]
+    assert {candidate.site for candidate in selected} == {
+        "dcinside",
+        "ppomppu",
+        "theqoo",
+        "low-quality",
+    }
+
+
+def test_site_balanced_selection_uses_recency_for_equal_scores():
+    created_at = datetime(2026, 8, 12, 6, tzinfo=timezone.utc)
+    candidates = [
+        RankingCandidate("older", "dcinside", 10, created_at),
+        RankingCandidate(
+            "newer-b",
+            "ppomppu",
+            10,
+            created_at + timedelta(minutes=1),
+        ),
+        RankingCandidate(
+            "newer-a",
+            "ygosu",
+            10,
+            created_at + timedelta(minutes=1),
+        ),
+    ]
+
+    assert [
+        candidate.board_id
+        for candidate in balance_site_exposure(candidates, limit=3)
+    ] == ["newer-b", "newer-a", "older"]

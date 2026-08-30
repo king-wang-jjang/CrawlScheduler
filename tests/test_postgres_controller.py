@@ -582,7 +582,7 @@ def test_upsert_records_native_metric_snapshots_and_scores(tmp_path):
     assert rows[0]["source_rank"] == 2
     assert rows[0]["hot_score"] > 0
     assert rows[0]["daily_score"] > 0
-    assert rows[0]["score_breakdown"]["algorithm_version"] == 2
+    assert rows[0]["score_breakdown"]["algorithm_version"] == 3
     assert rows[0]["score_breakdown"]["delta_comments_20m"] == 7
     assert rows[0]["score_breakdown"]["delta_likes_20m"] == 4
     assert len(snapshots) == 2
@@ -650,7 +650,7 @@ def test_refresh_native_metrics_preserves_crawled_and_local_board_data(tmp_path)
     assert refreshed["native_like_count"] == 5
     assert refreshed["native_view_count"] == 250
     assert refreshed["source_rank"] == 2
-    assert refreshed["score_breakdown"]["algorithm_version"] == 2
+    assert refreshed["score_breakdown"]["algorithm_version"] == 3
     assert refreshed["score_breakdown"]["llm_engagement_score"] == 82
 
     with get_session_factory(controller.database_url)() as session:
