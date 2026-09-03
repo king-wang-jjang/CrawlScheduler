@@ -41,6 +41,7 @@ SEOUL_TIMEZONE = ZoneInfo("Asia/Seoul")
 INSUFFICIENT_CONTENT_ANALYSIS_ERROR = (
     "crawled body is insufficient for AI analysis; content refresh required"
 )
+AUTOMATIC_ANALYSIS_PRIORITY = 10
 DEFAULT_CONTENT_REFRESH_COOLDOWN_SECONDS = 15 * 60
 MAX_CONTENT_REFRESH_COOLDOWN_SECONDS = 24 * 60 * 60
 
@@ -178,6 +179,10 @@ class PostgresController:
                 board.llm_engagement_score = None
                 board.llm_engagement_reason = None
                 board.analysis_status = "pending"
+                board.analysis_priority = max(
+                    int(board.analysis_priority or 0),
+                    AUTOMATIC_ANALYSIS_PRIORITY,
+                )
                 board.analysis_requested_at = now
                 board.analysis_started_at = None
                 board.analysis_updated_at = now
@@ -466,6 +471,18 @@ class PostgresController:
             content_sufficient=content_sufficient,
             content_recovered=content_recovered,
         )
+        analysis_priority = int(
+            document.get("analysis_priority")
+            or getattr(existing_board, "analysis_priority", 0)
+            or 0
+        )
+        if analysis_queue_values["analysis_status"] == "pending" and (
+            existing_board is None or content_recovered
+        ):
+            analysis_priority = max(
+                analysis_priority,
+                AUTOMATIC_ANALYSIS_PRIORITY,
+            )
         llm_engagement_score = self._optional_score(
             document["llm_engagement_score"]
             if "llm_engagement_score" in document
@@ -491,7 +508,7 @@ class PostgresController:
             "tags": tags,
             "llm_engagement_score": llm_engagement_score,
             "llm_engagement_reason": llm_engagement_reason,
-            "analysis_priority": int(document.get("analysis_priority") or getattr(existing_board, "analysis_priority", 0) or 0),
+            "analysis_priority": analysis_priority,
             "thumbnail": document.get("thumbnail") or first_thumbnail_path(contents),
             "comment_count": int(document.get("comment_count") or 0),
             "like_count": int(document.get("like_count") or 0),
@@ -837,9 +854,9 @@ class PostgresController:
 
         return {
             "analysis_status": "pending",
-            "analysis_requested_at": requested_at,
+            "analysis_requested_at": requested_at or now,
             "analysis_started_at": None,
-            "analysis_updated_at": None,
+            "analysis_updated_at": now,
             "analysis_retry_count": retry_count,
             "analysis_error": None,
         }

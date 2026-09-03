@@ -72,7 +72,10 @@ def test_realtime_document_is_upserted_into_boards_table(tmp_path):
 
 def test_realtime_document_stores_default_summary_without_ai_analysis(tmp_path):
     from crawl_scheduler.constants import DEFAULT_GPT_ANSWER
-    from crawl_scheduler.db.postgres_controller import PostgresController
+    from crawl_scheduler.db.postgres_controller import (
+        AUTOMATIC_ANALYSIS_PRIORITY,
+        PostgresController,
+    )
 
     analyzer = UnexpectedAnalyzer()
     controller = PostgresController(
@@ -88,7 +91,12 @@ def test_realtime_document_stores_default_summary_without_ai_analysis(tmp_path):
             "no": 124,
             "title": "ai title",
             "url": "https://example.com/post/124",
-            "contents": [{"type": "text", "content": "body"}],
+            "contents": [
+                {
+                    "type": "text",
+                    "content": "body with enough detail for automatic analysis",
+                }
+            ],
             "gpt_answer": DEFAULT_GPT_ANSWER,
             "tag": [],
         },
@@ -98,6 +106,9 @@ def test_realtime_document_stores_default_summary_without_ai_analysis(tmp_path):
 
     assert rows[0]["gpt_answer"] == DEFAULT_GPT_ANSWER
     assert rows[0]["tags"] == []
+    assert rows[0]["analysis_status"] == "pending"
+    assert rows[0]["analysis_priority"] == AUTOMATIC_ANALYSIS_PRIORITY
+    assert rows[0]["analysis_requested_at"] is not None
     assert analyzer.calls == 0
 
 
@@ -138,7 +149,10 @@ def test_insufficient_new_content_is_failed_until_body_refresh(
 def test_successful_content_refresh_requeues_incomplete_analysis(tmp_path):
     from crawl_scheduler.db.models import Board
     from crawl_scheduler.db.postgres import get_session_factory
-    from crawl_scheduler.db.postgres_controller import PostgresController
+    from crawl_scheduler.db.postgres_controller import (
+        AUTOMATIC_ANALYSIS_PRIORITY,
+        PostgresController,
+    )
 
     controller = PostgresController(database_url=f"sqlite:///{tmp_path / 'crawler.db'}")
     query = {"site": "ppomppu", "category": "freeboard", "no": 126}
@@ -171,6 +185,7 @@ def test_successful_content_refresh_requeues_incomplete_analysis(tmp_path):
 
     assert refreshed is not None
     assert refreshed["analysis_status"] == "pending"
+    assert refreshed["analysis_priority"] == AUTOMATIC_ANALYSIS_PRIORITY
     assert refreshed["analysis_requested_at"] is not None
     assert refreshed["analysis_started_at"] is None
     assert refreshed["analysis_retry_count"] == 0
