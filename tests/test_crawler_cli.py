@@ -463,7 +463,11 @@ def test_ppomppu_board_list_omits_reply_count_from_title(monkeypatch):
             return None
 
     monkeypatch.setattr(ppomppu, "PostgresController", lambda: FakeDB())
-    monkeypatch.setattr(ppomppu.requests, "get", lambda *args, **kwargs: FakeResponse())
+    monkeypatch.setattr(
+        ppomppu.requests,
+        "Session",
+        lambda: SimpleNamespace(get=lambda *args, **kwargs: FakeResponse()),
+    )
 
     crawler = ppomppu.Ppomppu()
     entries = crawler.get_board_entries()
@@ -678,7 +682,7 @@ def test_existing_posts_with_insufficient_body_are_refetched(
 
     query = {"site": site, "category": category, "no": no}
     expected_url = (
-        f"https://ppomppu.co.kr{relative_url}"
+        f"https://www.ppomppu.co.kr{relative_url}"
         if site == "ppomppu"
         else entry_url
     )
@@ -747,7 +751,13 @@ def test_new_posts_include_native_metrics_in_insert_payload(
         **metrics,
     )
     monkeypatch.setattr(crawler, "get_board_entries", lambda: [entry])
-    monkeypatch.setattr(crawler, "get_board_contents", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        crawler,
+        "get_board_contents",
+        lambda *args, **kwargs: [
+            {"type": "text", "text": "enough article body for analysis"}
+        ],
+    )
 
     assert crawler.get_realtime_best() is True
     assert len(fake_db.realtime_documents) == 1
