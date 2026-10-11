@@ -102,6 +102,14 @@ class DailyTop10Snapshot(Base):
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class HourlyTop10Snapshot(Base):
+    __tablename__ = "hourly_top10_snapshots"
+
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    posts: Mapped[list] = mapped_column(JSON, nullable=False)
+
+
 class CrawlerLog(Base):
     __tablename__ = "crawler_logs"
 

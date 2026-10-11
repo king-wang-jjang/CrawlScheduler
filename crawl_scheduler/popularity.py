@@ -70,6 +70,7 @@ class RankingCandidate:
     site: str
     score: float
     created_at: datetime
+    is_active: bool = True
 
 
 @dataclass(frozen=True)
@@ -283,6 +284,7 @@ def balance_site_exposure(
             site=str(candidate.site or "unknown"),
             score=_clean_score(candidate.score),
             created_at=candidate.created_at,
+            is_active=candidate.is_active,
         )
         for candidate in candidates
     }
@@ -298,6 +300,8 @@ def balance_site_exposure(
     site_counts: dict[str, int] = {}
 
     for candidate in ranked:
+        if not candidate.is_active:
+            continue
         if candidate.site in site_counts:
             continue
         _append_candidate(candidate, selected, selected_ids, site_counts)

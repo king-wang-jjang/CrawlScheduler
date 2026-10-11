@@ -7,6 +7,8 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import DateTime, delete, desc, func, inspect, literal, select, text
+from sqlalchemy.dialects.postgresql import insert as postgres_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from crawl_scheduler.constants import DEFAULT_GPT_ANSWER, DEFAULT_TAG
 from crawl_scheduler.crawled_content import (
@@ -20,6 +22,7 @@ from crawl_scheduler.db.models import (
     BoardMetricSnapshot,
     CrawlerLog,
     DailyTop10Snapshot,
+    HourlyTop10Snapshot,
 )
 from crawl_scheduler.db.postgres import Base, get_engine, get_session_factory
 from crawl_scheduler.popularity import (
@@ -306,7 +309,7 @@ class PostgresController:
         captured_at: datetime | None = None,
         limit: int = 10,
     ) -> int:
-        """Atomically replace one Seoul calendar day's daily ranking snapshot."""
+        """Atomically save daily rankings and the latest observed Top 10 for this hour."""
         captured_at = self._snapshot_captured_at(captured_at)
         snapshot_date = captured_at.astimezone(SEOUL_TIMEZONE).date()
         snapshot_limit = max(int(limit), 0)
@@ -382,8 +385,78 @@ class PostgresController:
                         )
                     ]
                 )
+                hourly_candidates = self._hourly_ranking_candidates(
+                    session, score_expression, freshness_column, freshness_cutoff
+                )
+                self._record_hourly_top10_snapshot(
+                    session, balance_site_exposure(hourly_candidates, 10), captured_at
+                )
 
         return len(ranked_boards)
+
+    @staticmethod
+    def _hourly_ranking_candidates(session, score_expression, freshness_column, freshness_cutoff):
+        # Match the live API: active sources get coverage first; older posts can
+        # fill the remaining slots. Daily archive eligibility remains separate.
+        site_ranked = select(
+            Board.id.label("board_id"),
+            Board.site.label("site"),
+            score_expression.label("score"),
+            Board.created_at.label("created_at"),
+            (freshness_column >= freshness_cutoff).label("is_active"),
+            func.row_number().over(
+                partition_by=Board.site,
+                order_by=(desc(score_expression), desc(Board.like_count), desc(Board.created_at)),
+            ).label("site_rank"),
+        ).subquery()
+        rows = session.execute(
+            select(site_ranked).where(site_ranked.c.site_rank <= 10)
+        ).all()
+        return [
+            RankingCandidate(
+                board_id=row.board_id, site=row.site, score=float(row.score or 0.0),
+                created_at=row.created_at, is_active=bool(row.is_active),
+            )
+            for row in rows
+        ]
+
+    @staticmethod
+    def _record_hourly_top10_snapshot(session, candidates, captured_at: datetime):
+        started_at = captured_at.replace(minute=0, second=0, microsecond=0)
+        metadata = {
+            board.id: board
+            for board in session.execute(
+                select(Board.id, Board.title, Board.site, Board.url).where(
+                    Board.id.in_([candidate.board_id for candidate in candidates])
+                )
+            ).all()
+        }
+        posts = [
+            {
+                "board_id": candidate.board_id,
+                "rank": rank,
+                "title": metadata[candidate.board_id].title,
+                "site": metadata[candidate.board_id].site,
+                "url": metadata[candidate.board_id].url,
+            }
+            for rank, candidate in enumerate(candidates, start=1)
+        ]
+        insert = sqlite_insert if session.bind.dialect.name == "sqlite" else postgres_insert
+        statement = insert(HourlyTop10Snapshot).values(
+            started_at=started_at, captured_at=captured_at, posts=posts
+        )
+        session.execute(
+            statement.on_conflict_do_update(
+                index_elements=[HourlyTop10Snapshot.started_at],
+                set_={"captured_at": captured_at, "posts": posts},
+                where=HourlyTop10Snapshot.captured_at <= captured_at,
+            )
+        )
+        session.execute(
+            delete(HourlyTop10Snapshot).where(
+                HourlyTop10Snapshot.started_at < started_at - timedelta(days=SNAPSHOT_RETENTION_DAYS)
+            )
+        )
 
     def _upsert_board(self, collection_name: str, document: dict) -> Board:
         source_id = self._source_id_from_document(collection_name, document)
