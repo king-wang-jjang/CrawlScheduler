@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from email.message import Message
 from email.utils import parsedate_to_datetime
 from math import ceil
 import os
@@ -164,8 +165,7 @@ class PopularCommunityCrawler(AbstractCommunityWebsite):
         try:
             response = self.get_response(url)
             response.raise_for_status()
-            html = getattr(response, "content", None) or response.text
-            soup = BeautifulSoup(html, "html.parser")
+            soup = self.soup_from_response(response)
         except CrawlerThrottledError:
             raise
         except Exception as exc:
@@ -240,7 +240,24 @@ class PopularCommunityCrawler(AbstractCommunityWebsite):
     def soup_from_url(cls, url):
         response = cls.get_response(url)
         response.raise_for_status()
+        return cls.soup_from_response(response)
+
+    @staticmethod
+    def soup_from_response(response):
         html = getattr(response, "content", None) or response.text
+        if isinstance(html, bytes):
+            headers = getattr(response, "headers", {}) or {}
+            content_type = Message()
+            content_type["Content-Type"] = headers.get("Content-Type", "")
+            encoding = content_type.get_content_charset()
+            if encoding:
+                try:
+                    # A truncated UTF-8 meta description must not make BS4
+                    # re-detect the entire Korean article as a different charset.
+                    html = html.decode(encoding, errors="replace")
+                except LookupError:
+                    # Unknown/missing HTTP charsets retain BS4's byte detection.
+                    pass
         return BeautifulSoup(html, "html.parser")
 
     @classmethod
